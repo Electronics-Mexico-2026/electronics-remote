@@ -1018,28 +1018,89 @@ pub fn is_modifier(evt: &KeyEvent) -> bool {
 }
 
 pub fn check_software_update() {
-    if is_custom_client() {
-        return;
-    }
     let opt = LocalConfig::get_option(keys::OPTION_ENABLE_CHECK_UPDATE);
     if config::option2bool(keys::OPTION_ENABLE_CHECK_UPDATE, &opt) {
         std::thread::spawn(move || allow_err!(do_check_software_update()));
     }
 }
 
-// No need to check `danger_accept_invalid_cert` for now.
-// Because the url is always `https://api.rustdesk.com/version/latest`.
+// Electronics Remote: updates come only from our own GitHub releases, never
+// from api.rustdesk.com or rustdesk/rustdesk.
+pub const ER_REPO: &str = "Electronics-Mexico-2026/electronics-remote";
+pub const ER_TAG_PREFIX: &str = "electronics-remote-";
+
+lazy_static::lazy_static! {
+    // "", "checking", "none", "available:<release page url>" or "error:<msg>"
+    pub static ref ER_UPDATE_STATE: Arc<Mutex<String>> = Default::default();
+}
+
+/// Stable release asset names the updater downloads.
+pub const ER_APK_ASSET: &str = "ElectronicsRemote.apk";
+
+pub fn er_windows_asset(msi: bool) -> &'static str {
+    if msi {
+        "ElectronicsRemote-x64.msi"
+    } else {
+        "ElectronicsRemote-x64.exe"
+    }
+}
+
+/// Own version, e.g. "1.5.0-er.7", set by CI through ER_VERSION.
+pub fn er_version() -> &'static str {
+    option_env!("ER_VERSION").unwrap_or("1.5.0-er.0")
+}
+
+/// "1.5.0-er.7" -> (get_version_number("1.5.0"), 7)
+fn er_version_key(v: &str) -> (i64, i64) {
+    let mut it = v.splitn(2, "-er.");
+    let base = get_version_number(it.next().unwrap_or_default());
+    let build = it
+        .next()
+        .and_then(|b| b.trim().parse::<i64>().ok())
+        .unwrap_or(0);
+    (base, build)
+}
+
+/// Manual check from the "Buscar actualizaciones" button: ignores the
+/// "check on startup" option and reports the result in ER_UPDATE_STATE.
+pub fn er_check_update_now() {
+    *ER_UPDATE_STATE.lock().unwrap() = "checking".to_owned();
+    std::thread::spawn(move || {
+        let state = match do_check_software_update() {
+            Ok(()) => {
+                let url = SOFTWARE_UPDATE_URL.lock().unwrap().clone();
+                if url.is_empty() {
+                    "none".to_owned()
+                } else {
+                    format!("available:{url}")
+                }
+            }
+            Err(e) => {
+                log::error!("Electronics Remote update check failed: {}", e);
+                format!("error:{e}")
+            }
+        };
+        *ER_UPDATE_STATE.lock().unwrap() = state;
+    });
+}
+
 #[tokio::main(flavor = "current_thread")]
 pub async fn do_check_software_update() -> hbb_common::ResultType<()> {
-    let (request, url) =
-        hbb_common::version_check_request(hbb_common::VER_TYPE_RUSTDESK_CLIENT.to_string());
+    let url = format!("https://api.github.com/repos/{ER_REPO}/releases/latest");
     let proxy_conf = Config::get_socks();
     let tls_url = get_url_for_tls(&url, &proxy_conf);
     let tls_type = get_cached_tls_type(tls_url);
     let is_tls_not_cached = tls_type.is_none();
     let tls_type = tls_type.unwrap_or(TlsType::Rustls);
     let client = create_http_client_async(tls_type, false);
-    let latest_release_response = match client.post(&url).json(&request).send().await {
+    let request = |client: reqwest::Client| {
+        client
+            .get(&url)
+            .header("User-Agent", "ElectronicsRemote")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+    };
+    let latest_release_response = match request(client).await {
         Ok(resp) => {
             upsert_tls_cache(tls_url, tls_type, false);
             resp
@@ -1048,7 +1109,7 @@ pub async fn do_check_software_update() -> hbb_common::ResultType<()> {
             if is_tls_not_cached && err.is_request() {
                 let tls_type = TlsType::NativeTls;
                 let client = create_http_client_async(tls_type, false);
-                let resp = client.post(&url).json(&request).send().await?;
+                let resp = request(client).await?;
                 upsert_tls_cache(tls_url, tls_type, false);
                 resp
             } else {
@@ -1056,12 +1117,19 @@ pub async fn do_check_software_update() -> hbb_common::ResultType<()> {
             }
         }
     };
+    if !latest_release_response.status().is_success() {
+        hbb_common::bail!("GitHub releases: {}", latest_release_response.status());
+    }
     let bytes = latest_release_response.bytes().await?;
-    let resp: hbb_common::VersionCheckResponse = serde_json::from_slice(&bytes)?;
-    let response_url = resp.url;
-    let latest_release_version = response_url.rsplit('/').next().unwrap_or_default();
-
-    if get_version_number(&latest_release_version) > get_version_number(crate::VERSION) {
+    let resp: serde_json::Value = serde_json::from_slice(&bytes)?;
+    let tag = resp["tag_name"].as_str().unwrap_or_default().to_owned();
+    let latest = tag.strip_prefix(ER_TAG_PREFIX).unwrap_or_default();
+    let is_valid_tag = !latest.is_empty()
+        && latest
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-');
+    if is_valid_tag && er_version_key(latest) > er_version_key(er_version()) {
+        let response_url = format!("https://github.com/{ER_REPO}/releases/tag/{tag}");
         #[cfg(feature = "flutter")]
         {
             let mut m = HashMap::new();

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter_hbb/common/er_update.dart';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -629,7 +630,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
           gFFI.invokeMethod(AndroidChannel.kSetStartOnBootOpt, toValue);
         }));
 
-    if (!bind.isCustomClient()) {
+    if (true) {
       enhancementsTiles.add(
         SettingsTile.switchTile(
           initialValue: _checkUpdateOnStartup,
@@ -1036,6 +1037,15 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
                       )),
                 ),
                 leading: Icon(Icons.info)),
+            if (isAndroid)
+              SettingsTile(
+                  onPressed: (context) => erCheckForUpdatesManually(),
+                  title: const Text('Buscar actualizaciones'),
+                  value: Padding(
+                    padding: EdgeInsets.symmetric(vertical: 8),
+                    child: Text('Electronics Remote ${erVersion()}'),
+                  ),
+                  leading: Icon(Icons.system_update)),
             SettingsTile(
                 title: Text(translate("Build Date")),
                 value: Padding(

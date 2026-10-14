@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter_hbb/common/er_update.dart';
 import 'dart:convert';
 import 'dart:io';
 
@@ -551,7 +552,7 @@ class _GeneralState extends State<_General> {
             ),
           ),
       ],
-      if (!isWeb && !bind.isCustomClient())
+      if (!isWeb)
         _OptionCheckBox(
           context,
           'Check for software update on startup',
@@ -2543,8 +2544,17 @@ class _AboutState extends State<_About> {
                   child: Text('${translate('Version')}: $version')
                       .marginSymmetric(vertical: 4.0)),
               SelectionArea(
+                  child: Text('Electronics Remote: ${erVersion()}')
+                      .marginSymmetric(vertical: 4.0)),
+              SelectionArea(
                   child: Text('${translate('Build Date')}: $buildDate')
                       .marginSymmetric(vertical: 4.0)),
+              if (isWindows)
+                ElevatedButton.icon(
+                  onPressed: () => erCheckForUpdatesManually(),
+                  icon: const Icon(Icons.system_update_alt),
+                  label: const Text('Buscar actualizaciones'),
+                ).marginSymmetric(vertical: 8.0),
               if (!isWeb)
                 SelectionArea(
                     child: Text('${translate('Fingerprint')}: $fingerprint')

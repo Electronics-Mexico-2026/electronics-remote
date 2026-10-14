@@ -43,7 +43,10 @@ env:
   VCPKG_COMMIT_ID: "9e593bb18ea69cc5095e012465dcd675a822ed0d"
   VERSION: "1.5.0"
   NDK_VERSION: "r28c"
-  RELEASE_TAG: "electronics-remote-1.5.0"
+  # Version propia: la compila el cliente (option_env! ER_VERSION) y la lleva el
+  # tag del release; el actualizador compara contra releases/latest de este repo.
+  ER_VERSION: "1.5.0-er.${{ github.run_number }}"
+  RELEASE_TAG: "electronics-remote-1.5.0-er.${{ github.run_number }}"
   # Marca (las lee branding/apply.sh)
   RENDEZVOUS_SERVER: ${{ inputs.rendezvous_server }}
   RS_PUB_KEY: ${{ inputs.rs_pub_key }}
@@ -304,7 +307,7 @@ jobs:
           python3 ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/rustdesk.exe
           popd
           mkdir -p ./SignOutput
-          mv ./target/release/rustdesk-portable-packer.exe ./SignOutput/ElectronicsRemote-${{ env.VERSION }}-x86_64.exe
+          mv ./target/release/rustdesk-portable-packer.exe ./SignOutput/ElectronicsRemote-x64.exe
 
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@6fb02220983dee41ce7ae257b6f4d8f9bf5ed4ce # v2
@@ -319,7 +322,7 @@ jobs:
           nuget restore msi.sln
           msbuild msi.sln -p:Configuration=Release -p:Platform=x64 /p:TargetVersion=Windows10
           $msi = Get-ChildItem ./Package/bin/*/Release/en-us/Package.msi | Select-Object -First 1
-          mv $msi.FullName ../../SignOutput/ElectronicsRemote-${{ env.VERSION }}-x86_64.msi
+          mv $msi.FullName ../../SignOutput/ElectronicsRemote-x64.msi
           popd
 
       - name: Upload Windows build
@@ -434,6 +437,8 @@ jobs:
     needs: [build-android-lib]
     name: android apk universal (arm64 + armv7)
     runs-on: ubuntu-24.04
+    env:
+      ANDROID_SIGNING_KEY: ${{ secrets.ANDROID_SIGNING_KEY }}
     steps:
       - name: Free Disk Space (Ubuntu)
         uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be # v1.3.1
@@ -505,7 +510,7 @@ jobs:
         run: |
           export PATH=/usr/lib/jvm/java-17-openjdk-amd64/bin:$PATH
           sed -i "s/org.gradle.jvmargs=-Xmx1024M/org.gradle.jvmargs=-Xmx2g/g" ./flutter/android/gradle.properties
-          # Firma con la llave debug del build (ver README de branding: secrets para firma estable)
+          # Se compila con la config debug y despues se re-firma con la keystore fija (secrets)
           sed -i "s/signingConfigs.release/signingConfigs.debug/g" ./flutter/android/app/build.gradle
           JNI=./flutter/android/app/src/main/jniLibs
           SYSROOT=${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib
@@ -516,8 +521,39 @@ jobs:
           pushd flutter
           flutter build apk --release --target-platform android-arm64,android-arm
           popd
-          mkdir -p out
-          mv ./flutter/build/app/outputs/flutter-apk/app-release.apk out/ElectronicsRemote-${{ env.VERSION }}-universal.apk
+          mkdir -p signed-apk out
+          mv ./flutter/build/app/outputs/flutter-apk/app-release.apk signed-apk/ElectronicsRemote.apk
+
+      - name: Setup sign tool version variable
+        shell: bash
+        run: |
+          BUILD_TOOL_VERSION=$(ls /usr/local/lib/android/sdk/build-tools/ | tail -n 1)
+          echo "ANDROID_SIGN_TOOL_VERSION=$BUILD_TOOL_VERSION" >> $GITHUB_ENV
+
+      - uses: r0adkll/sign-android-release@349ebdef58775b1e0d8099458af0816dc79b6407 # v1
+        name: Firmar APK con la keystore fija
+        if: env.ANDROID_SIGNING_KEY != ''
+        id: sign-apk
+        with:
+          releaseDirectory: ./signed-apk
+          signingKeyBase64: ${{ secrets.ANDROID_SIGNING_KEY }}
+          alias: ${{ secrets.ANDROID_ALIAS }}
+          keyStorePassword: ${{ secrets.ANDROID_KEY_STORE_PASSWORD }}
+          keyPassword: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        env:
+          BUILD_TOOLS_VERSION: ${{ env.ANDROID_SIGN_TOOL_VERSION }}
+
+      - name: Nombre estable del APK
+        shell: bash
+        run: |
+          if [ -n "${{ steps.sign-apk.outputs.signedReleaseFile }}" ]; then
+            mv "${{ steps.sign-apk.outputs.signedReleaseFile }}" out/ElectronicsRemote.apk
+            echo "APK firmado con la keystore fija"
+          else
+            mv signed-apk/ElectronicsRemote.apk out/ElectronicsRemote.apk
+            echo "::warning::Sin ANDROID_SIGNING_KEY: APK con llave debug (no actualiza encima)"
+          fi
+          "/usr/local/lib/android/sdk/build-tools/${ANDROID_SIGN_TOOL_VERSION}/apksigner" verify --print-certs out/ElectronicsRemote.apk
 
       - name: Upload apk
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -557,15 +593,16 @@ jobs:
             NOTE="Servidor: ${RENDEZVOUS_SERVER} | API: ${API_SERVER:-http://<servidor>:21114}"
           fi
           {
-            echo "Electronics Remote ${VERSION} (basado en RustDesk ${VERSION}, AGPL-3.0, uso interno)."
+            echo "Electronics Remote ${ER_VERSION} (basado en RustDesk ${VERSION}, AGPL-3.0, uso interno)."
             echo
             echo "$NOTE"
             echo
             echo "- Commit: ${GITHUB_SHA}"
             echo "- Corrida: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
             echo "- Windows x64: ${WIN_RESULT} | Android universal: ${APK_RESULT}"
-            echo "- APK firmado con llave debug del runner (cambia en cada build)."
+            echo "- Version: ${ER_VERSION}"
+            echo "- Actualizador: busca ElectronicsRemote-x64.exe / ElectronicsRemote-x64.msi / ElectronicsRemote.apk en releases/latest de este repo."
           } > notes.md
           gh release delete "$RELEASE_TAG" --yes --cleanup-tag || true
           gh release create "$RELEASE_TAG" dist/* --target "$GITHUB_SHA" \
-            --title "Electronics Remote ${VERSION}" --notes-file notes.md $FLAG
+            --title "Electronics Remote ${ER_VERSION}" --notes-file notes.md $FLAG

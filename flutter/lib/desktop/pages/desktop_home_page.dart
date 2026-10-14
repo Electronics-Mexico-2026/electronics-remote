@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter_hbb/common/er_update.dart';
 import 'dart:io';
 import 'dart:convert';
 
@@ -428,21 +429,10 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   }
 
   Widget buildHelpCards(String updateUrl) {
-    if (!bind.isCustomClient() &&
-        updateUrl.isNotEmpty &&
-        !isCardClosed &&
-        bind.mainUriPrefixSync().contains('rustdesk')) {
-      final isToUpdate = (isWindows || isMacOS) && bind.mainIsInstalled();
-      String btnText = isToUpdate ? 'Update' : 'Download';
-      GestureTapCallback onPressed = () async {
-        final Uri url = Uri.parse('https://rustdesk.com/download');
-        await launchUrl(url);
-      };
-      if (isToUpdate) {
-        onPressed = () {
-          handleUpdate(updateUrl);
-        };
-      }
+    if (updateUrl.isNotEmpty && !isCardClosed) {
+      final isToUpdate = isWindows && bind.mainIsInstalled();
+      String btnText = isToUpdate ? 'Actualizar' : 'Download';
+      GestureTapCallback onPressed = () => erStartUpdate(updateUrl);
       return buildInstallCard(
           "Status",
           "${translate("new-version-of-{${bind.mainGetAppNameSync()}}-tip")} (${bind.mainGetNewVersion()}).",
@@ -451,7 +441,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
           closeButton: true,
           help: isToUpdate ? 'Changelog' : null,
           link: isToUpdate
-              ? 'https://github.com/rustdesk/rustdesk/releases/tag/${bind.mainGetNewVersion()}'
+              ? updateUrl
               : null);
     }
     if (systemError.isNotEmpty) {

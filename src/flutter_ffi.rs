@@ -2719,7 +2719,17 @@ pub fn main_get_common(key: String) -> String {
     } else if key == "local-permanent-password-set" {
         return ui_interface::is_local_permanent_password_set().to_string();
     } else {
-        if key.starts_with("download-data-") {
+        if key == "er-update-state" {
+            crate::common::ER_UPDATE_STATE.lock().unwrap().clone()
+        } else if key == "er-version" {
+            crate::common::er_version().to_owned()
+        } else if key == "er-apk-url" {
+            format!(
+                "https://github.com/{}/releases/latest/download/{}",
+                crate::common::ER_REPO,
+                crate::common::ER_APK_ASSET
+            )
+        } else if key.starts_with("download-data-") {
             let id = key.replace("download-data-", "");
             match crate::hbbs_http::downloader::get_download_data(&id) {
                 Ok(data) => serde_json::to_string(&data).unwrap_or_default(),
@@ -2730,21 +2740,9 @@ pub fn main_get_common(key: String) -> String {
         } else if key.starts_with("download-file-") {
             let _version = key.replace("download-file-", "");
             #[cfg(target_os = "windows")]
-            return match (
-                crate::platform::windows::is_msi_installed(),
-                crate::common::is_custom_client(),
-            ) {
-                (Ok(true), false) => match crate::platform::windows::release_arch_suffix() {
-                    Some(arch) => format!("rustdesk-{_version}-{arch}.msi"),
-                    None => "error:unsupported".to_owned(),
-                },
-                (Ok(true), true) | (Ok(false), _) => {
-                    match crate::platform::windows::release_arch_suffix() {
-                        Some(arch) => format!("rustdesk-{_version}-{arch}.exe"),
-                        None => "error:unsupported".to_owned(),
-                    }
-                }
-                (Err(e), _) => {
+            return match crate::platform::windows::is_msi_installed() {
+                Ok(msi) => crate::common::er_windows_asset(msi).to_owned(),
+                Err(e) => {
                     log::error!("Failed to check if is msi: {}", e);
                     format!("error:update-failed-check-msi-tip")
                 }
@@ -2870,6 +2868,10 @@ pub fn main_set_common(_key: String, _value: String) {
                 }
             }
         }
+    }
+
+    if _key == "er-check-update" {
+        crate::common::er_check_update_now();
     }
 
     if _key == "remove-downloader" {

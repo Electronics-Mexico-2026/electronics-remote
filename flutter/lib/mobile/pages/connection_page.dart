@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter_hbb/common/er_update.dart';
 import 'package:auto_size_text_field/auto_size_text_field.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/common/formatter/id_formatter.dart';
@@ -84,7 +85,7 @@ class _ConnectionPageState extends State<ConnectionPage> {
       slivers: [
         SliverList(
             delegate: SliverChildListDelegate([
-          if (!bind.isCustomClient() && !isIOS)
+          if (!isIOS)
             Obx(() => _buildUpdateUI(stateGlobal.updateUrl.value)),
           _buildRemoteIDTextField(),
         ])),
@@ -124,7 +125,11 @@ class _ConnectionPageState extends State<ConnectionPage> {
         ? const SizedBox(height: 0)
         : InkWell(
             onTap: () async {
-              final url = 'https://rustdesk.com/download';
+              if (isAndroid) {
+                await erUpdateApk();
+                return;
+              }
+              final url = updateUrl;
               // https://pub.dev/packages/url_launcher#configuration
               // https://developer.android.com/training/package-visibility/use-cases#open-urls-custom-tabs
               //
@@ -138,9 +143,9 @@ class _ConnectionPageState extends State<ConnectionPage> {
             child: Container(
                 alignment: AlignmentDirectional.center,
                 width: double.infinity,
-                color: Colors.pinkAccent,
+                color: MyTheme.accent,
                 padding: const EdgeInsets.symmetric(vertical: 12),
-                child: Text(translate('Download new version'),
+                child: Text('Actualizar a la nueva version',
                     style: const TextStyle(
                         color: Colors.white, fontWeight: FontWeight.bold))));
   }

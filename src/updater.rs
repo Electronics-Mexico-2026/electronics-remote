@@ -181,7 +181,7 @@ fn check_update(manually: bool) -> ResultType<()> {
         return Ok(());
     }
     #[cfg(target_os = "windows")]
-    let update_msi = crate::platform::is_msi_installed()? && !crate::is_custom_client();
+    let update_msi = crate::platform::is_msi_installed()?;
     if !(manually || config::Config::get_bool_option(keys::OPTION_ALLOW_AUTO_UPDATE)) {
         return Ok(());
     }
@@ -204,12 +204,11 @@ fn check_update(manually: bool) -> ResultType<()> {
                     std::env::consts::ARCH
                 );
             };
+            let _ = arch;
             format!(
-                "{}/rustdesk-{}-{}.{}",
+                "{}/{}",
                 download_url,
-                version,
-                arch,
-                if update_msi { "msi" } else { "exe" }
+                crate::common::er_windows_asset(update_msi)
             )
         } else {
             format!("{}/rustdesk-{}-x86-sciter.exe", download_url, version)
@@ -376,8 +375,7 @@ pub fn get_update_download_file_from_url(url: &str) -> Option<PathBuf> {
     let tag = segments.next()?;
     let filename = segments.next()?;
 
-    if owner != "rustdesk"
-        || repo != "rustdesk"
+    if format!("{owner}/{repo}") != crate::common::ER_REPO
         || releases != "releases"
         || download != "download"
         || tag.is_empty()
