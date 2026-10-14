@@ -325,7 +325,7 @@ jobs:
           cp -r ./rustdesk ./rustdesk-msi
           mv "./rustdesk-msi/rustdesk.exe" "./rustdesk-msi/Electronics Remote.exe"
           pushd ./res/msi
-          python preprocess.py --arp -d ../../rustdesk-msi --app-name "Electronics Remote" -m "Electronics Mexico"
+          python preprocess.py --arp -d ../../rustdesk-msi --app-name "Electronics Remote" -m "Electronics Mexico" -v ${{ env.VERSION }} --revision-version ${{ github.run_number }}
           nuget restore msi.sln
           msbuild msi.sln -p:Configuration=Release -p:Platform=x64 /p:TargetVersion=Windows10
           $msi = Get-ChildItem ./Package/bin/*/Release/en-us/Package.msi | Select-Object -First 1
