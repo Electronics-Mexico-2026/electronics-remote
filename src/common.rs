@@ -1038,6 +1038,13 @@ lazy_static::lazy_static! {
 pub const ER_APK_ASSET: &str = "ElectronicsRemote.apk";
 
 pub fn er_windows_asset(msi: bool) -> &'static str {
+    if config::is_incoming_only() {
+        return if msi {
+            "ElectronicsRemoteEquipo-x64.msi"
+        } else {
+            "ElectronicsRemoteEquipo-x64.exe"
+        };
+    }
     if msi {
         "ElectronicsRemote-x64.msi"
     } else {
@@ -2426,6 +2433,8 @@ pub fn rustdesk_interval(i: Interval) -> ThrottledInterval {
 }
 
 pub fn load_custom_client() {
+    #[cfg(windows)]
+    er_apply_equipo_mode();
     #[cfg(debug_assertions)]
     if let Ok(data) = std::fs::read_to_string("./custom.txt") {
         read_custom_client(data.trim());
@@ -2445,6 +2454,26 @@ pub fn load_custom_client() {
         };
         read_custom_client(&data.trim());
     }
+}
+
+// Electronics Remote Equipo: same build as the full app, told apart by the
+// executable name (ElectronicsRemoteEquipo.exe, as installed and as packed).
+// It gets its own APP_NAME (service, Program Files folder, config, IPC) so both
+// can be installed side by side, and runs incoming-only.
+#[cfg(windows)]
+fn er_apply_equipo_mode() {
+    let is_equipo = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.file_stem().map(|s| s.to_string_lossy().to_lowercase()))
+        .map_or(false, |stem| stem.contains("equipo"));
+    if !is_equipo {
+        return;
+    }
+    *config::APP_NAME.write().unwrap() = "ElectronicsRemoteEquipo".to_owned();
+    config::HARD_SETTINGS
+        .write()
+        .unwrap()
+        .insert("conn-type".to_owned(), "incoming".to_owned());
 }
 
 fn read_custom_client_advanced_settings(

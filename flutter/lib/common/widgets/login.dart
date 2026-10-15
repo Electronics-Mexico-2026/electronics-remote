@@ -38,7 +38,18 @@ class _OidcProviderBranding {
   });
 }
 
+// Electronics Remote: el proveedor OIDC del sitio (cualquiera que no sea uno
+// público conocido) se muestra como «Iniciar sesión con Electronics México».
+const _kErOwnIconKey = 'electronics-mexico';
+bool _erIsOwnProvider(String op) => !kOpSvgList.contains(op.toLowerCase());
+
 _OidcProviderBranding _oidcProviderBranding(String op) {
+  if (_erIsOwnProvider(op)) {
+    return _OidcProviderBranding(
+      label: 'Electronics México',
+      iconKey: _kErOwnIconKey,
+    );
+  }
   switch (op.toLowerCase()) {
     case 'azure':
       return _OidcProviderBranding(
@@ -76,7 +87,7 @@ class _IconOP extends StatelessWidget {
       margin: margin,
       child: icon == null
           ? SvgPicture.asset(
-              'assets/auth-$svgFile.svg',
+              op == _kErOwnIconKey ? 'assets/icon.svg' : 'assets/auth-$svgFile.svg',
               width: 20,
             )
           : SvgPicture.string(
@@ -110,11 +121,13 @@ class ButtonOP extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final branding = _oidcProviderBranding(op);
-    final buttonLabel = translate("Continue with {${branding.label}}");
+    final buttonLabel = _erIsOwnProvider(op)
+        ? 'Iniciar sesión con ${branding.label}'
+        : translate("Continue with {${branding.label}}");
     return Row(children: [
       Container(
         height: height,
-        width: 200,
+        width: 280,
         child: Obx(() => ElevatedButton(
             style: ElevatedButton.styleFrom(
               backgroundColor: primaryColor,
@@ -619,7 +632,7 @@ class LoginWidgetOP extends StatelessWidget {
     }
     return SingleChildScrollView(
         child: Container(
-            width: 200,
+            width: 280,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               mainAxisAlignment: MainAxisAlignment.spaceAround,
