@@ -16,6 +16,8 @@ import 'package:window_manager/window_manager.dart';
 import '../../common.dart';
 import '../../models/peer_model.dart';
 import '../../models/platform_model.dart';
+import '../../desktop/er/er_peer_card.dart';
+import '../../desktop/er/er_theme.dart';
 import 'peer_card.dart';
 
 typedef PeerFilter = bool Function(Peer peer);
@@ -254,7 +256,9 @@ class _PeersViewState extends State<_PeersView>
                       ? Container(height: 45, child: visibilityChild)
                       : peerCardUiType.value == PeerUiType.grid
                           ? SizedBox(
-                              width: 220, height: 140, child: visibilityChild)
+                              width: isDesktop ? kErGridCardWidth : 220,
+                              height: isDesktop ? kErGridCardHeight : 140,
+                              child: visibilityChild)
                           : SizedBox(
                               width: 220, height: 42, child: visibilityChild))
                   : Container(child: visibilityChild);
@@ -303,7 +307,11 @@ class _PeersViewState extends State<_PeersView>
             );
           }
         },
-        future: matchPeers(filters[0].value, filters[1].value, peers.peers),
+        future: matchPeers(filters[0].value, filters[1].value, peers.peers,
+            erOnlineOnly: isDesktop && ErState.onlineOnly.value,
+            erGroupKey: isDesktop
+                ? '${gFFI.groupModel.isSelectedDeviceGroup.value}/${gFFI.groupModel.selectedAccessibleItemName.value}'
+                : ''),
       );
     }, obslist);
 
@@ -359,9 +367,13 @@ class _PeersViewState extends State<_PeersView>
   }
 
   Future<List<Peer>>? matchPeers(
-      String searchText, String sortedBy, List<Peer> peers) async {
+      String searchText, String sortedBy, List<Peer> peers,
+      {bool erOnlineOnly = false, String erGroupKey = ''}) async {
     if (widget.peerFilter != null) {
       peers = peers.where((peer) => widget.peerFilter!(peer)).toList();
+    }
+    if (erOnlineOnly) {
+      peers = peers.where((peer) => peer.online).toList();
     }
 
     // fallback to id sorting

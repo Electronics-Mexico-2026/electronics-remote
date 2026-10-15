@@ -14,6 +14,8 @@ import '../../models/peer_model.dart';
 import '../../models/platform_model.dart';
 import '../../desktop/widgets/material_mod_popup_menu.dart' as mod_menu;
 import '../../desktop/widgets/popup_menu.dart';
+import '../../desktop/er/er_peer_card.dart';
+import '../../desktop/er/er_theme.dart';
 import 'dart:math' as math;
 
 typedef PopupMenuEntryBuilder = Future<List<mod_menu.PopupMenuEntry<String>>>
@@ -72,10 +74,22 @@ class _PeerCardState extends State<_PeerCard>
             if (isMobile) {
               widget.connect(context, peer.id);
             } else {
+              ErState.select(peer, widget.tab);
+              ErState.gridFocus.requestFocus();
               peerTabModel.select(peer);
             }
           }
         },
+        onSecondaryTapDown: isDesktop && !peerTabModel.multiSelectionMode
+            ? (e) {
+                ErState.select(peer, widget.tab);
+                ErState.gridFocus.requestFocus();
+                final x = e.globalPosition.dx;
+                final y = e.globalPosition.dy;
+                _menuPos = RelativeRect.fromLTRB(x, y, x, y);
+                _showPeerMenu(peer.id);
+              }
+            : null,
         onLongPress: () => peerTabModel.select(peer),
         child: child);
   }
@@ -280,6 +294,15 @@ class _PeerCardState extends State<_PeerCard>
 
   Widget _buildPeerCard(
       BuildContext context, Peer peer, Rx<BoxDecoration?> deco) {
+    if (isDesktop) {
+      return ErGridCard(
+        peer: peer,
+        tab: widget.tab,
+        trailing: Provider.of<PeerTabModel>(context).multiSelectionMode
+            ? checkBoxOrActionMoreLandscape(peer, isTile: false)
+            : null,
+      );
+    }
     hideUsernameOnCard ??=
         bind.mainGetBuildinOption(key: kHideUsernameOnCard) == 'Y';
     final name = hideUsernameOnCard == true
@@ -525,7 +548,10 @@ abstract class BasePeerCard extends StatelessWidget {
 
   Future<List<mod_menu.PopupMenuEntry<String>>> _buildPopupMenuEntry(
           BuildContext context) async =>
-      (await _buildMenuItems(context))
+      (isDesktop
+              ? erArrangeMenu(context, this, await _buildMenuItems(context),
+                  _erBuiltIn)
+              : await _buildMenuItems(context))
           .map((e) => e.build(
               context,
               const MenuConfig(
@@ -537,6 +563,27 @@ abstract class BasePeerCard extends StatelessWidget {
 
   @protected
   Future<List<MenuEntryBase<String>>> _buildMenuItems(BuildContext context);
+
+  /// Entradas que el menú tipo RealVNC ya pone arriba (Conectar, Renombrar,
+  /// Eliminar); se quitan de la lista original para no repetirlas.
+  static final Expando<bool> _erBuiltIn = Expando<bool>('er-built-in');
+
+  T _erTag<T extends Object>(T e) {
+    _erBuiltIn[e] = true;
+    return e;
+  }
+
+  /// Renombrar desde la barra de menú o con F2.
+  void erRename() =>
+      (_renameAction(peer.id) as MenuEntryButton<String>).proc();
+
+  /// Eliminar desde la barra de menú o con Supr.
+  void erRemove() =>
+      (_removeAction(peer.id) as MenuEntryButton<String>).proc();
+
+  /// Olvidar la contraseña guardada (Propiedades › Seguridad).
+  void erForgetPassword() =>
+      (_unrememberPasswordAction(peer.id) as MenuEntryButton<String>).proc();
 
   MenuEntryBase<String> _connectCommonAction(
     BuildContext context,
@@ -575,12 +622,12 @@ abstract class BasePeerCard extends StatelessWidget {
 
   @protected
   MenuEntryBase<String> _connectAction(BuildContext context) {
-    return _connectCommonAction(
+    return _erTag(_connectCommonAction(
       context,
       (peer.alias.isEmpty
           ? translate('Connect')
           : '${translate('Connect')} ${peer.id}'),
-    );
+    ));
   }
 
   @protected
@@ -754,7 +801,7 @@ abstract class BasePeerCard extends StatelessWidget {
 
   @protected
   MenuEntryBase<String> _renameAction(String id) {
-    return MenuEntryButton<String>(
+    return _erTag(MenuEntryButton<String>(
       childBuilder: (TextStyle? style) => Text(
         translate('Rename'),
         style: style,
@@ -778,12 +825,12 @@ abstract class BasePeerCard extends StatelessWidget {
       },
       padding: menuPadding,
       dismissOnClicked: true,
-    );
+    ));
   }
 
   @protected
   MenuEntryBase<String> _removeAction(String id) {
-    return MenuEntryButton<String>(
+    return _erTag(MenuEntryButton<String>(
       childBuilder: (TextStyle? style) => Row(
         children: [
           Text(
@@ -834,7 +881,7 @@ abstract class BasePeerCard extends StatelessWidget {
       },
       padding: menuPadding,
       dismissOnClicked: true,
-    );
+    ));
   }
 
   @protected

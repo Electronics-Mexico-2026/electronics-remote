@@ -26,7 +26,12 @@ import '../../common.dart';
 import '../../models/platform_model.dart';
 
 class PeerTabPage extends StatefulWidget {
-  const PeerTabPage({Key? key}) : super(key: key);
+  /// Electronics Remote: la barra lateral elige la sección; aquí solo va la
+  /// cuadrícula (sin la fila de pestañas).
+  final bool erMode;
+  final Widget? erGroupView;
+  const PeerTabPage({Key? key, this.erMode = false, this.erGroupView})
+      : super(key: key);
   @override
   State<PeerTabPage> createState() => _PeerTabPageState();
 }
@@ -103,6 +108,18 @@ class _PeerTabPageState extends State<PeerTabPage>
     final model = Provider.of<PeerTabModel>(context);
     Widget selectionWrap(Widget widget) {
       return model.multiSelectionMode ? createMultiSelectionBar(model) : widget;
+    }
+
+    if (widget.erMode) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (model.multiSelectionMode)
+            SizedBox(height: 32, child: createMultiSelectionBar(model))
+                .paddingOnly(right: 12),
+          _createPeersView(),
+        ],
+      );
     }
 
     return Column(
@@ -193,7 +210,13 @@ class _PeerTabPageState extends State<PeerTabPage>
         children: [Expanded(child: InkWell())],
       ));
     } else {
-      if (model.visibleEnabledOrderedIndexs.contains(model.currentTab)) {
+      if (widget.erMode &&
+          widget.erGroupView != null &&
+          model.currentTab == PeerTabIndex.group.index) {
+        child = widget.erGroupView!;
+      } else if (model.visibleEnabledOrderedIndexs
+              .contains(model.currentTab) ||
+          (widget.erMode && model.isEnabled[model.currentTab])) {
         child = entries[model.currentTab].widget;
       } else {
         debugPrint("should not happen! currentTab not in visibleIndexs");
