@@ -274,6 +274,7 @@ pub fn core_main() -> Option<Vec<String>> {
                     Ok(_) => translate("Installation Successful!".to_string()),
                     Err(err) => {
                         println!("Failed with error: {err}");
+                        log::error!("Silent install failed: {err}");
                         translate("Installation failed!".to_string())
                     }
                 };

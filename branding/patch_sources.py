@@ -13,6 +13,11 @@ from pathlib import Path
 
 ROOT = Path(sys.argv[1]).resolve()
 APP = "Electronics Remote"
+# Nombre interno (APP_NAME): servicio, carpeta de Program Files, exe instalado,
+# carpeta de config y esquema URL. RustDesk exige [a-zA-Z0-9-]+ para instalar el
+# .exe (validate_install_app_name en src/platform/windows.rs); con espacio el
+# --silent-install / --install / --update / desinstalar fallan.
+APP_ID = "ElectronicsRemote"
 COMPANY = "Electronics Mexico"
 COPYRIGHT = "Electronics Mexico - basado en RustDesk (AGPL-3.0)"
 
@@ -69,7 +74,7 @@ cfg = "libs/hbb_common/src/config.rs"
 text, cfg_crlf = read(cfg)
 n_total = 0
 text, n = re.subn(r'(pub static ref APP_NAME: RwLock<String> = RwLock::new\()"[^"]*"',
-                  lambda m: f'{m.group(1)}"{APP}"', text)
+                  lambda m: f'{m.group(1)}"{APP_ID}"', text)
 n_total += n
 text, n = re.subn(r'^pub const RENDEZVOUS_SERVERS: &\[&str\] = &\[[^\]]*\];',
                   lambda m: f'pub const RENDEZVOUS_SERVERS: &[&str] = &["{rs_str(server)}"];',
@@ -84,7 +89,7 @@ else:
 if n_total != 3:
     errors.append(f"{cfg}: esperaba 3 reemplazos, hubo {n_total}")
 write(cfg, text, cfg_crlf)
-print(f"config.rs -> APP_NAME={APP!r} RENDEZVOUS_SERVERS=[{server!r}] "
+print(f"config.rs -> APP_NAME={APP_ID!r} RENDEZVOUS_SERVERS=[{server!r}] "
       f"RS_PUB_KEY={'(original)' if not key else key[:6] + '...'}")
 
 # ------------------------------------------- servidor API (rustdesk-api)
