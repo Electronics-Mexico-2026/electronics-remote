@@ -581,6 +581,16 @@ abstract class BasePeerCard extends StatelessWidget {
   void erRemove() =>
       (_removeAction(peer.id) as MenuEntryButton<String>).proc();
 
+  /// Menú completo de RustDesk (Android: «Más opciones…» de la hoja (i)).
+  Future<void> erShowFullMenu(BuildContext context, RelativeRect position) async {
+    await mod_menu.showMenu(
+      context: context,
+      position: position,
+      items: await _buildPopupMenuEntry(context),
+      elevation: 8,
+    );
+  }
+
   /// Olvidar la contraseña guardada (Propiedades › Seguridad).
   void erForgetPassword() =>
       (_unrememberPasswordAction(peer.id) as MenuEntryButton<String>).proc();

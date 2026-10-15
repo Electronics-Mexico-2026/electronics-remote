@@ -20,6 +20,7 @@ import '../../models/model.dart';
 import '../../models/platform_model.dart';
 import 'address_book.dart';
 import '../../desktop/er/er_password_dialog.dart';
+import '../../mobile/er/er_m_session.dart' show erMobilePasswordDialog;
 
 void clientClose(SessionID sessionId, FFI ffi) async {
   if (allowAskForNoteAtEndOfConnection(ffi, true)) {
@@ -985,6 +986,12 @@ _connectDialog(
   // Electronics Remote: cuadro «Autenticación» tipo RealVNC en escritorio.
   if (isDesktop && osUsernameController == null && passwordController != null) {
     await erPasswordDialog(
+        sessionId, dialogManager, passwordController, rememberPassword);
+    return;
+  }
+  // Android: el mismo cuadro con el acomodo de RealVNC para celular.
+  if (isAndroid && osUsernameController == null && passwordController != null) {
+    await erMobilePasswordDialog(
         sessionId, dialogManager, passwordController, rememberPassword);
     return;
   }

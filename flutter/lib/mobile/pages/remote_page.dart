@@ -24,6 +24,8 @@ import '../../models/platform_model.dart';
 import '../../utils/image.dart';
 import '../widgets/dialog.dart';
 import '../widgets/custom_scale_widget.dart';
+import '../../desktop/er/er_thumbs.dart';
+import '../er/er_m_session.dart';
 
 final initText = '1' * 1024;
 
@@ -77,6 +79,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
 
   Worker? _waylandKeyboardGateWorker;
   bool _waylandKeyboardGateInitialized = false;
+  Timer? _erThumbTimer;
 
   InputModel get inputModel => gFFI.inputModel;
   SessionID get sessionId => gFFI.sessionId;
@@ -102,9 +105,16 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
     );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual, overlays: []);
-      gFFI.dialogManager
-          .showLoading(translate('Connecting...'), onCancel: closeConnection);
+      if (isAndroid) {
+        erShowConnecting(gFFI.dialogManager, widget.id);
+      } else {
+        gFFI.dialogManager
+            .showLoading(translate('Connecting...'), onCancel: closeConnection);
+      }
     });
+    if (isAndroid) {
+      _erThumbTimer = ErThumbs.startCapture(gFFI, widget.id, GlobalKey());
+    }
     WakelockManager.enable(_uniqueKey);
     _physicalFocusNode.requestFocus();
     gFFI.inputModel.listenToMouse(true);
@@ -142,6 +152,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
 
   @override
   Future<void> dispose() async {
+    if (isAndroid) ErThumbs.stopCapture(_erThumbTimer, gFFI, widget.id);
     WidgetsBinding.instance.removeObserver(this);
     // Close the session up-front. `gFFI.close()` below only calls `sessionClose`
     // after several awaits (canvas save, image update, the `enable_soft_keyboard`
@@ -388,6 +399,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
       char = 'VK_SPACE';
     }
     inputModel.inputKey(char);
+    if (isAndroid) erAfterRemoteKey();
   }
 
   void openKeyboard() {
@@ -455,7 +467,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
           floatingActionButtonLocation: keyboardIsVisible
               ? FABLocation(FloatingActionButtonLocation.endFloat, 0, -35)
               : null,
-          floatingActionButton: !showActionButton
+          floatingActionButton: !showActionButton || isAndroid
               ? null
               : FloatingActionButton(
                   mini: !keyboardIsVisible,
@@ -490,13 +502,13 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
                           gFFI.ffiModel.tryShowAndroidActionsOverlay();
                           return Offstage();
                         }(),
-                  _bottomWidget(),
+                  isAndroid ? Offstage() : _bottomWidget(),
                   gFFI.ffiModel.pi.isSet.isFalse
                       ? emptyOverlay(MyTheme.canvasColor)
                       : Offstage(),
                 ],
               )),
-          body: Obx(
+          body: _erWrapBody(Obx(
             () => getRawPointerAndKeyBody(Overlay(
               initialEntries: [
                 OverlayEntry(builder: (context) {
@@ -530,7 +542,53 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
                 })
               ],
             )),
-          )),
+          ))),
+    );
+  }
+
+  /// Android: barra flotante, teclas, modo mouse e información tipo RealVNC.
+  Widget _erWrapBody(Widget body) {
+    if (!isAndroid) return body;
+    return Stack(
+      children: [
+        Positioned.fill(child: body),
+        Positioned.fill(
+          child: Obx(() => gFFI.ffiModel.pi.isSet.isTrue
+              ? ErSessionOverlay(
+                  id: widget.id,
+                  actions: ErSessionActions(
+                    openKeyboard: openKeyboard,
+                    hideKeyboard: () {
+                      setState(() => _showEdit = false);
+                      gFFI.invokeMethod("enable_soft_keyboard", false);
+                      _mobileFocusNode.unfocus();
+                      _physicalFocusNode.requestFocus();
+                    },
+                    keyboardVisible: () =>
+                        keyboardVisibilityController.isVisible && _showEdit,
+                    showOptions: () {
+                      setState(() => _showEdit = false);
+                      showOptions(context, widget.id, gFFI.dialogManager);
+                    },
+                    showActions: () {
+                      setState(() => _showEdit = false);
+                      showActions(widget.id);
+                    },
+                    chat: () async {
+                      final voice = await gFFI.invokeMethod(
+                          "get_value", "KEY_IS_SUPPORT_VOICE_CALL");
+                      if (voice == true) {
+                        showChatOptions(widget.id);
+                      } else {
+                        onPressedTextChat(widget.id);
+                      }
+                    },
+                    close: () => clientClose(sessionId, gFFI),
+                  ),
+                )
+              : const SizedBox.shrink()),
+        ),
+      ],
     );
   }
 
@@ -666,9 +724,16 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
               right: 10,
               child: QualityMonitor(gFFI.qualityMonitorModel),
             ),
-            KeyHelpTools(
-                keyboardIsVisible: keyboardIsVisible,
-                showGestureHelp: _showGestureHelp),
+            if (isAndroid)
+              Builder(builder: (_) {
+                gFFI.cursorModel
+                    .keyHelpToolsVisibilityChanged(null, keyboardIsVisible);
+                return const Offstage();
+              })
+            else
+              KeyHelpTools(
+                  keyboardIsVisible: keyboardIsVisible,
+                  showGestureHelp: _showGestureHelp),
             SizedBox(
               width: 0,
               height: 0,

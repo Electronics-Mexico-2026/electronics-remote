@@ -18,6 +18,7 @@ import '../../models/peer_model.dart';
 import '../../models/platform_model.dart';
 import '../../desktop/er/er_peer_card.dart';
 import '../../desktop/er/er_theme.dart';
+import '../../mobile/er/er_m_home.dart' show erMobilePeerGrid;
 import 'peer_card.dart';
 
 typedef PeerFilter = bool Function(Peer peer);
@@ -74,12 +75,14 @@ class _PeersView extends StatefulWidget {
   final PeerFilter? peerFilter;
   final PeerCardBuilder peerCardBuilder;
   final PeerTabIndex peerTabIndex;
+  final bool erMobileGrid;
 
   const _PeersView(
       {required this.peers,
       required this.peerCardBuilder,
       required this.peerTabIndex,
       this.peerFilter,
+      this.erMobileGrid = false,
       Key? key})
       : super(key: key);
 
@@ -267,7 +270,9 @@ class _PeersViewState extends State<_PeersView>
             // We should avoid too many rebuilds. Win10(Some machines) on Flutter 3.19.6.
             // Continious rebuilds of `ListView.builder` will cause memory leak.
             // Simple demo can reproduce this issue.
-            final Widget child = Obx(() => stateGlobal.isPortrait.isTrue
+            final Widget child = widget.erMobileGrid
+                ? erMobilePeerGrid(peers, (p) => buildOnePeer(p, true))
+                : Obx(() => stateGlobal.isPortrait.isTrue
                 ? ListView.builder(
                     itemCount: peers.length,
                     itemBuilder: (BuildContext context, int index) {
@@ -308,8 +313,9 @@ class _PeersViewState extends State<_PeersView>
           }
         },
         future: matchPeers(filters[0].value, filters[1].value, peers.peers,
-            erOnlineOnly: isDesktop && ErState.onlineOnly.value,
-            erGroupKey: isDesktop
+            erOnlineOnly:
+                (isDesktop || widget.erMobileGrid) && ErState.onlineOnly.value,
+            erGroupKey: (isDesktop || widget.erMobileGrid)
                 ? '${gFFI.groupModel.isSelectedDeviceGroup.value}/${gFFI.groupModel.selectedAccessibleItemName.value}'
                 : ''),
       );
@@ -426,12 +432,14 @@ abstract class BasePeersView extends StatelessWidget {
   final PeerTabIndex peerTabIndex;
   final PeerFilter? peerFilter;
   final PeerCardBuilder peerCardBuilder;
+  final bool erMobileGrid;
 
   const BasePeersView({
     Key? key,
     required this.peerTabIndex,
     this.peerFilter,
     required this.peerCardBuilder,
+    this.erMobileGrid = false,
   }) : super(key: key);
 
   @override
@@ -458,7 +466,8 @@ abstract class BasePeersView extends StatelessWidget {
         peers: peers,
         peerFilter: peerFilter,
         peerCardBuilder: peerCardBuilder,
-        peerTabIndex: peerTabIndex);
+        peerTabIndex: peerTabIndex,
+        erMobileGrid: erMobileGrid);
   }
 }
 

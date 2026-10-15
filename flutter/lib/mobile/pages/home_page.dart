@@ -8,6 +8,7 @@ import '../../common/widgets/chat_page.dart';
 import '../../models/platform_model.dart';
 import '../../models/state_model.dart';
 import 'connection_page.dart';
+import '../er/er_m_home.dart';
 
 abstract class PageShape extends Widget {
   final String title = "";
@@ -61,6 +62,7 @@ class HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    if (isAndroid && !bind.isIncomingOnly()) return _erBuild(context);
     return WillPopScope(
         onWillPop: () async {
           if (_selectedIndex != 0) {
@@ -104,6 +106,37 @@ class HomePageState extends State<HomePage> {
           ),
           body: _pages.elementAt(_selectedIndex),
         ));
+  }
+
+  /// Android: pantalla principal con el acomodo de RealVNC Viewer.
+  Widget _erBuild(BuildContext context) {
+    void select(int index) => setState(() {
+          if (_selectedIndex != index) {
+            _selectedIndex = index;
+            if (isChatPageCurrentTab) {
+              gFFI.chatModel.hideChatIconOverlay();
+              gFFI.chatModel.hideChatWindowOverlay();
+              gFFI.chatModel
+                  .mobileClearClientUnread(gFFI.chatModel.currentKey.connId);
+            }
+          }
+        });
+    return ErMobileShell(
+      pages: _pages,
+      selectedIndex: _selectedIndex,
+      onSelect: select,
+      titleOf: (i) => i == _chatPageTabIndex ? appTitle() : Text(_pages[i].title),
+      navBar: BottomNavigationBar(
+        key: navigationBarKey,
+        items: _pages
+            .map((page) =>
+                BottomNavigationBarItem(icon: page.icon, label: page.title))
+            .toList(),
+        currentIndex: _selectedIndex,
+        type: BottomNavigationBarType.fixed,
+        onTap: select,
+      ),
+    );
   }
 
   Widget appTitle() {
