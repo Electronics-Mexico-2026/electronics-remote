@@ -177,6 +177,22 @@ flutter:
     - family: More
       fonts:
         - asset: assets/more.ttf
+    # Electronics Remote: letras de la marca (OFL)
+    - family: Montserrat
+      fonts:
+        - asset: assets/fonts/er/Montserrat-Regular.ttf
+        - asset: assets/fonts/er/Montserrat-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/er/Montserrat-SemiBold.ttf
+          weight: 600
+    - family: BaiJamjuree
+      fonts:
+        - asset: assets/fonts/er/BaiJamjuree-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/er/BaiJamjuree-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/er/BaiJamjuree-Bold.ttf
+          weight: 700
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/assets-and-images/#resolution-aware.
