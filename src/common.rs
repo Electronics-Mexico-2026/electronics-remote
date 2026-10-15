@@ -2322,6 +2322,46 @@ pub async fn secure_tcp_required(conn: &mut Stream, key: &str) -> ResultType<()>
     }
 }
 
+/// Rendezvous servers found not to offer the key exchange, so later connections in this
+/// process do not wait for it again.
+static SERVERS_WITHOUT_KEY_EXCHANGE: Mutex<Vec<String>> = Mutex::new(Vec::new());
+const KEY_EXCHANGE_PROBE_TIMEOUT: u64 = 2_000;
+
+/// For a socket about to carry a secret for the rendezvous server (the account token, a switch
+/// code): `Ok(true)` once the server's key exchange has encrypted it, `Ok(false)` when the server
+/// does not offer one, and then the caller must withhold the secret instead of sending it in the
+/// clear. The open source hbbs never sends a KeyExchange (and never reads the token), so the
+/// `READ_TIMEOUT` wait of [`secure_tcp`] made every connection with a signed-in account fail; a
+/// server that offers the exchange sends it as soon as it accepts, so a short wait is enough.
+pub async fn secure_tcp_for_secret(conn: &mut Stream, key: &str, server: &str) -> ResultType<bool> {
+    if use_ws() {
+        return Ok(true);
+    }
+    if SERVERS_WITHOUT_KEY_EXCHANGE
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|s| s == server)
+    {
+        return Ok(false);
+    }
+    match timeout(KEY_EXCHANGE_PROBE_TIMEOUT, key_exchange(conn, key, true)).await {
+        Ok(Ok(true)) => Ok(true),
+        Ok(Err(err)) => Err(err),
+        Ok(Ok(false)) | Err(_) => {
+            log::info!(
+                "{} does not offer the key exchange, its secrets are withheld",
+                server
+            );
+            let mut servers = SERVERS_WITHOUT_KEY_EXCHANGE.lock().unwrap();
+            if !servers.iter().any(|s| s == server) {
+                servers.push(server.to_owned());
+            }
+            Ok(false)
+        }
+    }
+}
+
 #[inline]
 fn get_pk(pk: &[u8]) -> Option<[u8; 32]> {
     if pk.len() == 32 {
@@ -3584,6 +3624,22 @@ mod tests {
         let host = rendezvous_stub(serve).await;
         let mut conn = connect(&host).await;
         secure_tcp(&mut conn, &key).await.unwrap();
+        assert!(!conn.is_secured());
+    }
+
+    #[tokio::test]
+    async fn test_secure_tcp_for_secret_does_not_wait_for_a_silent_server() {
+        let (key, _) = server_key();
+        // The open source hbbs only reads: it never sends a KeyExchange.
+        let serve = |s: hbb_common::tcp::FramedStream| async move {
+            sleep(Duration::from_secs(30)).await;
+            drop(s);
+        };
+        let host = rendezvous_stub(serve).await;
+        let mut conn = connect(&host).await;
+        let started = std::time::Instant::now();
+        assert!(!secure_tcp_for_secret(&mut conn, &key, &host).await.unwrap());
+        assert!(started.elapsed() < Duration::from_secs(5));
         assert!(!conn.is_secured());
     }
 

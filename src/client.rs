@@ -31,7 +31,7 @@ use crate::{
     create_symmetric_key_msg, decode_id_pk, decode_id_pk_dtls, dtls_fingerprint_bound, get_rs_pk,
     is_keyboard_mode_supported,
     kcp_stream::KcpStream,
-    secure_tcp, secure_tcp_required,
+    secure_tcp_required,
     ui_interface::{get_builtin_option, resolve_avatar_url, use_texture_render},
     ui_session_interface::{InvokeUiSession, Session},
 };
@@ -846,7 +846,8 @@ impl Client {
             NatType::from_i32(my_nat_type).unwrap_or(NatType::UNKNOWN_NAT)
         };
 
-        let switch_code = interface.get_switch_code();
+        let mut token = token;
+        let mut switch_code = interface.get_switch_code();
         let legacy_secure = !key.is_empty() && (!token.is_empty() || !switch_code.is_empty());
         let carries_offer = webrtc_offerer.as_ref().and_then(|g| g.stream()).is_some();
         // Counted from before the key exchange, so the exchange spends the UDP NAT test's own
@@ -875,9 +876,13 @@ impl Client {
             }
         }
         if !exchanged && legacy_secure {
-            secure_tcp(&mut socket, &key)
+            if !crate::secure_tcp_for_secret(&mut socket, &key, &rendezvous_server)
                 .await
-                .map_err(|e| anyhow!("Failed to secure tcp: {}", e))?;
+                .map_err(|e| anyhow!("Failed to secure tcp: {}", e))?
+            {
+                token.clear();
+                switch_code.clear();
+            }
         }
         // A token or switch code has always taken this socket straight to the punch without
         // waiting for the UDP NAT test. The WebRTC exchange does not replace that wait, it only
@@ -1795,8 +1800,13 @@ impl Client {
                 .await
                 .with_context(|| "Failed to connect to rendezvous server")?;
 
+            let mut token = token;
+            let mut switch_code = switch_code;
             if !key.is_empty() && (!token.is_empty() || !switch_code.is_empty()) {
-                secure_tcp(&mut socket, key).await?;
+                if !crate::secure_tcp_for_secret(&mut socket, key, rendezvous_server).await? {
+                    token = "";
+                    switch_code = "";
+                }
             }
 
             ipv4 = socket.local_addr().is_ipv4();
@@ -5249,7 +5259,9 @@ async fn hc_connection_(
     let host = check_port(&rendezvous_server, RENDEZVOUS_PORT);
     let mut conn = connect_tcp(host.clone(), CONNECT_TIMEOUT).await?;
     let key = crate::get_key(true).await;
-    crate::secure_tcp(&mut conn, &key).await?;
+    if !crate::secure_tcp_for_secret(&mut conn, &key, &host).await? {
+        return Ok(());
+    }
     let mut msg_out = RendezvousMessage::new();
     msg_out.set_hc(HealthCheck {
         token,
