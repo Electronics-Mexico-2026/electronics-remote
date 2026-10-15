@@ -214,13 +214,7 @@ class _PeersViewState extends State<_PeersView>
             ),
           );
           if (!widget.erMobileGrid) return empty;
-          // Desplazable para que «jalar para actualizar» funcione sin equipos.
-          return LayoutBuilder(
-            builder: (context, c) => ListView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              children: [SizedBox(height: c.maxHeight, child: empty)],
-            ),
-          );
+          return erMobilePeerGrid(const [], (_) => const SizedBox.shrink());
         } else {
           return _buildPeersView(peers);
         }
@@ -314,6 +308,18 @@ class _PeersViewState extends State<_PeersView>
               _queryOnlines(true);
             }
             return child;
+          } else if (widget.erMobileGrid) {
+            // Desplazable también mientras carga, para poder jalar.
+            return LayoutBuilder(
+              builder: (context, c) => ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                children: [
+                  SizedBox(
+                      height: c.maxHeight,
+                      child: const Center(child: CircularProgressIndicator()))
+                ],
+              ),
+            );
           } else {
             return const Center(
               child: CircularProgressIndicator(),

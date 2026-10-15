@@ -7,6 +7,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -178,6 +179,11 @@ class _ErMobileShellState extends State<ErMobileShell>
         await gFFI.groupModel.pull(force: force, quiet: quiet);
         break;
     }
+    final failed = (t == PeerTabIndex.group || t == PeerTabIndex.ab) &&
+        (user.networkError.isNotEmpty ||
+            (t == PeerTabIndex.group &&
+                gFFI.groupModel.groupLoadError.isNotEmpty));
+    if (!failed) ErMobileState.lastRefresh.value = DateTime.now();
     if (force) {
       ErState.thumbsVersion.value++;
       // Todos los de la sección, también los que «Solo en línea» esconde.
@@ -442,11 +448,8 @@ class _ErMobileShellState extends State<ErMobileShell>
                     tab: tab,
                   ),
                 );
-                if (tab != PeerTabIndex.group && tab != PeerTabIndex.ab) {
-                  return list;
-                }
                 return Column(children: [
-                  _panelErrorBanner(context, tab),
+                  _statusBar(context, tab),
                   Expanded(child: list),
                 ]);
               }),
@@ -457,22 +460,44 @@ class _ErMobileShellState extends State<ErMobileShell>
     );
   }
 
-  /// Una línea fija (no un aviso por intento) cuando el panel no respondió:
-  /// la lista que se ve puede estar vieja.
-  Widget _panelErrorBanner(BuildContext context, PeerTabIndex tab) {
+  /// Una línea fija (no un aviso por intento): cuándo se actualizó, cuántos
+  /// equipos se ven y un botón para actualizar sin depender del gesto. Si el
+  /// panel no respondió lo dice ahí mismo.
+  Widget _statusBar(BuildContext context, PeerTabIndex tab) {
     return Obx(() {
-      final err = gFFI.userModel.networkError.value.isNotEmpty ||
-          (tab == PeerTabIndex.group &&
-              gFFI.groupModel.groupLoadError.value.isNotEmpty);
-      if (!err) return const SizedBox.shrink();
+      final err = erMobilePanelError(tab);
+      final at = ErMobileState.lastRefresh.value;
+      final n = ErMobileState.shownCount.value;
+      String two(int v) => v.toString().padLeft(2, '0');
+      final when = at == null
+          ? 'Sin actualizar'
+          : 'Actualizado ${two(at.hour)}:${two(at.minute)}';
+      final text = err.isNotEmpty
+          ? 'No se pudo leer el panel'
+          : '$when · $n ${n == 1 ? 'equipo' : 'equipos'}';
       return Container(
         width: double.infinity,
         color: ErColors.surface,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        child: Text(
-            'No se pudo leer el panel. Jala hacia abajo para reintentar.',
-            style: erTextStyle(context,
-                size: 13, color: Colors.white.withOpacity(0.8))),
+        padding: const EdgeInsets.only(left: 16, right: 4),
+        child: Row(children: [
+          Expanded(
+            child: Text(text,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: erTextStyle(context,
+                    size: 13,
+                    color: err.isNotEmpty
+                        ? const Color(0xFFFFB4A9)
+                        : Colors.white.withOpacity(0.75))),
+          ),
+          TextButton.icon(
+            onPressed: () => _load(tab, force: true),
+            icon: const Icon(Icons.refresh_rounded,
+                size: 18, color: ErColors.cyan),
+            label: Text('Actualizar',
+                style: erTextStyle(context, size: 13, color: ErColors.cyan)),
+          ),
+        ]),
       );
     });
   }
@@ -793,10 +818,143 @@ class ErMobilePeersView extends BasePeersView {
   }
 }
 
+class ErMobileState {
+  static final lastRefresh = Rxn<DateTime>();
+  static final shownCount = 0.obs;
+}
+
+PeerTabIndex _erCurrentTab() =>
+    PeerTabIndex.values[gFFI.peerTabModel.currentTab];
+
+/// El error del panel que aplica a la sección, o vacío.
+String erMobilePanelError(PeerTabIndex tab) {
+  if (tab != PeerTabIndex.group && tab != PeerTabIndex.ab) return '';
+  final net = gFFI.userModel.networkError.value;
+  if (net.isNotEmpty) return net;
+  if (tab == PeerTabIndex.group) return gFFI.groupModel.groupLoadError.value;
+  return '';
+}
+
+String erMobileEmptyText() {
+  final tab = _erCurrentTab();
+  final err = erMobilePanelError(tab);
+  if (err.isNotEmpty) {
+    return 'No se pudo leer el panel:\n$err\n\nJala hacia abajo para reintentar.';
+  }
+  final group = gFFI.groupModel;
+  final where =
+      tab == PeerTabIndex.group && group.selectedAccessibleItemName.isNotEmpty
+          ? (group.isSelectedDeviceGroup.value
+              ? 'en este grupo'
+              : 'de este usuario')
+          : 'en esta sección';
+  if (ErState.onlineOnly.value) {
+    return 'No hay equipos en línea $where (está activo «Solo en línea» '
+        'en el filtro). Jala hacia abajo para actualizar.';
+  }
+  if (peerSearchText.value.trim().isNotEmpty) {
+    return 'Ningún equipo $where coincide con la búsqueda.';
+  }
+  return 'No hay equipos $where. Jala hacia abajo para actualizar.';
+}
+
+/// Resumen para diagnosticar la lista (Acerca de › tocar la versión 5 veces).
+String erMobileDiagnostics() {
+  final user = gFFI.userModel;
+  final group = gFFI.groupModel;
+  final tab = _erCurrentTab();
+  final token = bind.mainGetLocalOption(key: 'access_token');
+  final peers = group.peers.toList();
+  String or(String v, String empty) => v.isEmpty ? empty : v;
+  final b = StringBuffer()
+    ..writeln('Versión: ${erVersion()}')
+    ..writeln('Usuario: ${or(user.userName.value, '(sin sesión)')}'
+        ' · admin: ${user.isAdmin.value}')
+    ..writeln('Token: ${token.isEmpty ? 'no' : 'sí'}')
+    ..writeln('networkError: ${or(user.networkError.value, '(ninguno)')}')
+    ..writeln('Grupo cargando: ${group.groupLoading.value}')
+    ..writeln('Error del grupo: ${or(group.groupLoadError.value, '(ninguno)')}')
+    ..writeln('Recibidos: ${group.users.length} usuarios, '
+        '${peers.length} equipos, '
+        '${group.deviceGroups.length} grupos de equipos')
+    ..writeln('Grupos de equipos: '
+        '${group.deviceGroups.map((e) => e.name).join(', ')}')
+    ..writeln('Sección: ${tab.name}')
+    ..writeln('Seleccionado: «${group.selectedAccessibleItemName.value}»'
+        ' (${group.isSelectedDeviceGroup.value ? 'grupo de equipos' : 'usuario'})')
+    ..writeln('Solo en línea: ${ErState.onlineOnly.value}'
+        ' · búsqueda: «${peerSearchText.value}»')
+    ..writeln('En el modelo de la vista: ${group.peersModel.peers.length}')
+    ..writeln('Después del filtro (en pantalla): '
+        '${ErMobileState.shownCount.value}')
+    ..writeln('Última actualización: '
+        '${ErMobileState.lastRefresh.value ?? '(nunca)'}');
+  for (final p in peers.take(30)) {
+    final name = p.alias.isNotEmpty ? p.alias : p.hostname;
+    b.writeln('- ${p.id} «$name» grupo=«${p.device_group_name}»'
+        ' usuario=«${p.loginName}» en línea=${p.online}');
+  }
+  return b.toString();
+}
+
+void erDiagnosticsDialog(BuildContext context) {
+  final text = erMobileDiagnostics();
+  showDialog(
+    context: context,
+    builder: (ctx) => erThemed(AlertDialog(
+      backgroundColor: ErColors.surface,
+      title: Text('Diagnóstico',
+          style: erTextStyle(ctx, size: 17, color: Colors.white)),
+      content: SingleChildScrollView(
+        child: SelectableText(text,
+            style: erTextStyle(ctx, size: 12.5, color: Colors.white)),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: text));
+              showToast('Copiado');
+            },
+            child:
+                Text('Copiar', style: erTextStyle(ctx, color: ErColors.cyan))),
+        TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child:
+                Text('Cerrar', style: erTextStyle(ctx, color: Colors.white70))),
+      ],
+    )),
+  );
+}
+
 /// Cuadrícula: varias columnas con el celular abierto, una cerrado.
 Widget erMobilePeerGrid(List<Peer> peers, Widget Function(Peer) item) {
+  final n = peers.length;
+  if (ErMobileState.shownCount.value != n) {
+    Future.microtask(() => ErMobileState.shownCount.value = n);
+  }
   return LayoutBuilder(builder: (context, c) {
     final w = c.maxWidth;
+    if (peers.isEmpty) {
+      // Siempre un texto y siempre desplazable: así «jalar hacia abajo»
+      // funciona aunque no haya ningún equipo que pintar.
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: [
+          SizedBox(
+            height: c.maxHeight,
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text(erMobileEmptyText(),
+                    textAlign: TextAlign.center,
+                    style: erTextStyle(context,
+                        size: 15, color: Colors.white.withOpacity(0.8))),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
     final cols = w >= kErWideWidth ? (w / 270).floor().clamp(2, 6) : 1;
     const gap = 10.0;
     const pad = 10.0;
@@ -1107,6 +1265,7 @@ void erNewConnectionDialog(BuildContext context) {
 }
 
 void erAboutDialog(BuildContext context) {
+  var taps = 0;
   showDialog(
     context: context,
     builder: (ctx) => erThemed(AlertDialog(
@@ -1116,8 +1275,16 @@ void erAboutDialog(BuildContext context) {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Versión ${erVersion()}',
-              style: erTextStyle(ctx, size: 14, color: Colors.white)),
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () {
+              if (++taps < 5) return;
+              taps = 0;
+              erDiagnosticsDialog(ctx);
+            },
+            child: Text('Versión ${erVersion()}',
+                style: erTextStyle(ctx, size: 14, color: Colors.white)),
+          ),
           const SizedBox(height: 6),
           Text('Basado en RustDesk (AGPL-3.0)',
               style: erTextStyle(ctx, size: 12.5, color: Colors.white60)),

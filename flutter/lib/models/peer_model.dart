@@ -42,7 +42,7 @@ class Peer {
         forceAlwaysRelay = json['forceAlwaysRelay'] == 'true',
         rdpPort = json['rdpPort'] ?? '',
         rdpUsername = json['rdpUsername'] ?? '',
-        loginName = json['loginName'] ?? '',
+        loginName = json['loginName'] ?? json['login_name'] ?? '',
         device_group_name = json['device_group_name'] ?? '',
         note = json['note'] is String ? json['note'] : '',
         sameServer = json['same_server'];
