@@ -80,9 +80,9 @@ class _OnlineStatusWidgetState extends State<OnlineStatusWidget> {
 
     setupServerWidget() => Flexible(
           child: Offstage(
-            offstage: !(!_svcStopped.value &&
-                stateGlobal.svcStatus.value == SvcStatus.ready &&
-                _svcIsUsingPublicServer.value),
+            // Electronics Remote trae su servidor dentro del programa;
+            // RustDesk lo toma por público y mostraba el aviso en falso.
+            offstage: true,
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [

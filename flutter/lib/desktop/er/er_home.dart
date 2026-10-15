@@ -316,7 +316,11 @@ class _ErHomeState extends State<ErHome> with WindowListener {
         MenuItemButton(
           onPressed: onPressed,
           shortcut: shortcut,
-          child: Text(text, style: style),
+          // Sin acción = gris, como RealVNC (el estilo fija el color).
+          child: Text(text,
+              style: onPressed == null
+                  ? style.copyWith(color: Theme.of(context).disabledColor)
+                  : style),
         );
     Widget sub(String text, List<Widget> children) => SubmenuButton(
           menuChildren: children,
