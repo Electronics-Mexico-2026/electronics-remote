@@ -561,6 +561,9 @@ jobs:
             echo "::warning::Sin ANDROID_SIGNING_KEY: APK con llave debug (no actualiza encima)"
           fi
           "/usr/local/lib/android/sdk/build-tools/${ANDROID_SIGN_TOOL_VERSION}/apksigner" verify --print-certs out/ElectronicsRemote.apk
+          BADGING=$("/usr/local/lib/android/sdk/build-tools/${ANDROID_SIGN_TOOL_VERSION}/aapt2" dump badging out/ElectronicsRemote.apk)
+          grep -E "^package:|^application-label:" <<< "$BADGING"
+          grep -q "^package: name='com.electronicsmexico.remote'" <<< "$BADGING"             || { echo "::error::El APK no trae el package com.electronicsmexico.remote"; exit 1; }
 
       - name: Upload apk
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
