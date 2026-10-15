@@ -259,6 +259,10 @@ jobs:
         run: |
           python3 .\build.py --portable --flutter --skip-portable-pack --hwcodec --vram
           mv ./flutter/build/windows/x64/runner/Release ./rustdesk
+          # El instalador de RustDesk instala y crea el servicio con <APP_NAME>.exe
+          # (como los clientes personalizados); con rustdesk.exe el servicio queda
+          # apuntando a un exe que no existe.
+          mv ./rustdesk/rustdesk.exe ./rustdesk/ElectronicsRemote.exe
 
           Invoke-WebRequest -Uri https://github.com/rustdesk-org/rdev/releases/download/usbmmidd_v2/usbmmidd_v2.zip -OutFile usbmmidd_v2.zip
           Expand-Archive usbmmidd_v2.zip -DestinationPath .
@@ -311,7 +315,7 @@ jobs:
           sed -i '/dpiAware/d' res/manifest.xml
           pushd ./libs/portable
           pip3 install -r requirements.txt
-          python3 ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/rustdesk.exe
+          python3 ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/ElectronicsRemote.exe
           popd
           mkdir -p ./SignOutput
           mv ./target/release/rustdesk-portable-packer.exe ./SignOutput/ElectronicsRemote-x64.exe
@@ -323,7 +327,6 @@ jobs:
         continue-on-error: true
         run: |
           cp -r ./rustdesk ./rustdesk-msi
-          mv "./rustdesk-msi/rustdesk.exe" "./rustdesk-msi/ElectronicsRemote.exe"
           pushd ./res/msi
           python preprocess.py --arp -d ../../rustdesk-msi --app-name "ElectronicsRemote" -m "Electronics Mexico" -v ${{ env.VERSION }} --revision-version ${{ github.run_number }}
           nuget restore msi.sln
@@ -575,6 +578,7 @@ jobs:
     name: prueba instalacion silenciosa (.exe)
     needs: [build-windows-x64]
     runs-on: windows-latest
+    timeout-minutes: 20
     env:
       APP_ID: ElectronicsRemote
     steps:
@@ -591,9 +595,9 @@ jobs:
           New-Item -ItemType Directory -Force -Path test-logs | Out-Null
           $exe = Resolve-Path dist/ElectronicsRemote-x64.exe
           Write-Host "Ejecutando $exe --silent-install"
-          $p = Start-Process -FilePath $exe -ArgumentList '--silent-install' -PassThru -Wait `
+          $p = Start-Process -FilePath $exe -ArgumentList '--silent-install' -PassThru `
                  -RedirectStandardOutput test-logs/consola-stdout.txt -RedirectStandardError test-logs/consola-stderr.txt
-          Write-Host "exit code del empaquetador: $($p.ExitCode)"
+          if ($p.WaitForExit(180000)) { Write-Host "exit code del empaquetador: $($p.ExitCode)" } else { Write-Host "el empaquetador sigue vivo; se verifica igual" }
           $dir = Join-Path $env:ProgramFiles $env:APP_ID
           $ok = $false
           for ($i = 0; $i -lt 60; $i++) {
@@ -623,6 +627,22 @@ jobs:
             exit 1
           }
           Write-Host "OK: servicio $($env:APP_ID) corriendo y $dir instalado"
+
+      - name: Captura de la ventana principal
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $exe = Join-Path (Join-Path $env:ProgramFiles $env:APP_ID) "$($env:APP_ID).exe"
+          if (Test-Path $exe) { Start-Process -FilePath $exe; Start-Sleep -Seconds 25 }
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+          $g = [System.Drawing.Graphics]::FromImage($bmp)
+          $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+          New-Item -ItemType Directory -Force -Path test-logs | Out-Null
+          $bmp.Save("test-logs/pantalla.png", [System.Drawing.Imaging.ImageFormat]::Png)
+          Write-Host "captura $($b.Width)x$($b.Height)"
 
       - name: Subir logs de la prueba
         if: always()
