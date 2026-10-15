@@ -24,6 +24,8 @@ import './popup_menu.dart';
 import './kb_layout_type_chooser.dart';
 import 'package:flutter_hbb/utils/scale.dart';
 import 'package:flutter_hbb/common/widgets/custom_scale_base.dart';
+import 'package:flutter_hbb/common/er_f8.dart';
+import '../er/er_session_menu.dart';
 
 enum _ToolbarEdge { top, right, bottom, left }
 
@@ -484,6 +486,20 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
 
   int get windowId => stateGlobal.windowId;
 
+  // Electronics Remote: menú de sesión tipo RealVNC (botón ☰ y F8).
+  final _erMenuController = MenuController();
+  late final VoidCallback _erF8Opener = () {
+    if (!mounted || hide.value) return;
+    if (collapse.isTrue) {
+      collapse.value = false;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _erMenuController.open();
+      });
+    } else {
+      _erMenuController.open();
+    }
+  };
+
   void _setFullscreen(bool v) {
     stateGlobal.setFullscreen(v);
     // stateGlobal.fullscreen is RxBool now, no need to call setState.
@@ -650,6 +666,8 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
       initialValue: 0,
     );
 
+    erRegisterF8Opener(widget.ffi.sessionId.toString(), _erF8Opener);
+
     widget.onEnterOrLeaveImageSetter(identityHashCode(this), (enter) {
       if (enter) {
         triggerAutoHide();
@@ -676,6 +694,7 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
 
   @override
   dispose() {
+    erUnregisterF8Opener(widget.ffi.sessionId.toString(), _erF8Opener);
     ++_dockingOptionSyncSerial;
     widget.onEnterOrLeaveImageCleaner(identityHashCode(this));
     super.dispose();
@@ -770,7 +789,13 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
       final borderRadius = _collapseHandleBorderRadius(edge);
       return Offstage(
         offstage: _dragging.isTrue,
-        child: Material(
+        child: MouseRegion(
+          onEnter: (_) {
+            if (collapse.isTrue && _dragging.isFalse) {
+              collapse.value = false;
+            }
+          },
+          child: Material(
           elevation: _ToolbarTheme.elevation,
           shadowColor: MyTheme.color(context).shadow,
           borderRadius: borderRadius,
@@ -795,6 +820,7 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
             borderRadius: borderRadius,
           ),
         ),
+        ),
       );
     });
   }
@@ -803,6 +829,12 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
       BuildContext context, _ToolbarEdge edge, bool isHorizontal) {
     final List<Widget> toolbarItems = [];
     toolbarItems.add(_PinMenu(state: widget.state));
+    toolbarItems.add(ErSessionMenuButton(
+      id: widget.id,
+      ffi: widget.ffi,
+      controller: _erMenuController,
+      setFullscreen: _setFullscreen,
+    ));
     toolbarItems.add(Obx(() {
       final privacyModeState = PrivacyModeState.find(widget.id);
       if ((privacyModeState.isEmpty ||

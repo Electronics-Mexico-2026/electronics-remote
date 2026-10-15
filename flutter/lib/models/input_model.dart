@@ -19,6 +19,7 @@ import '../../models/state_model.dart';
 import 'input_modifier_utils.dart';
 import 'relative_mouse_model.dart';
 import '../common.dart';
+import '../common/er_f8.dart';
 import '../consts.dart';
 
 /// Mouse button enum.
@@ -736,6 +737,14 @@ class InputModel {
   }
 
   KeyEventResult handleRawKeyEvent(RawKeyEvent e) {
+    if (isDesktop &&
+        e.logicalKey == LogicalKeyboardKey.f8 &&
+        erHasF8Opener(sessionId.toString())) {
+      if (e is RawKeyDownEvent && !e.repeat) {
+        erOpenF8Menu(sessionId.toString());
+      }
+      return KeyEventResult.handled;
+    }
     if (isViewOnly) return KeyEventResult.handled;
     if (isViewCamera) return KeyEventResult.handled;
     if (!isInputSourceFlutter) {
@@ -821,6 +830,12 @@ class InputModel {
   }
 
   KeyEventResult handleKeyEvent(KeyEvent e) {
+    if (isDesktop &&
+        e.logicalKey == LogicalKeyboardKey.f8 &&
+        erHasF8Opener(sessionId.toString())) {
+      if (e is KeyDownEvent) erOpenF8Menu(sessionId.toString());
+      return KeyEventResult.handled;
+    }
     if (isViewOnly) return KeyEventResult.handled;
     if (isViewCamera) return KeyEventResult.handled;
     if (!isInputSourceFlutter) {

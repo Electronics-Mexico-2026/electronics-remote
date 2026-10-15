@@ -23,6 +23,8 @@ import '../widgets/remote_toolbar.dart';
 import '../widgets/kb_layout_type_chooser.dart';
 import '../widgets/tabbar_widget.dart';
 import 'macos_full_screen_focus_recovery.dart';
+import '../er/er_session_menu.dart';
+import '../er/er_thumbs.dart';
 
 import 'package:flutter_hbb/native/custom_cursor.dart'
     if (dart.library.html) 'package:flutter_hbb/web/custom_cursor.dart';
@@ -127,6 +129,8 @@ class _RemotePageState extends State<RemotePage>
   Function(bool)? _onEnterOrLeaveImage4Toolbar;
 
   late FFI _ffi;
+  Timer? _erThumbTimer;
+  final GlobalKey _erThumbKey = GlobalKey(debugLabel: 'er-thumb');
   Worker? _waylandKeyboardModeWorker;
   bool _waylandKeyboardModeNormalized = false;
   bool _waylandKeyboardModeNormalizing = false;
@@ -156,7 +160,9 @@ class _RemotePageState extends State<RemotePage>
           widget.tabController?.state.listen(_onMacOSTabStateChanged);
     }
     Get.put<FFI>(_ffi, tag: widget.id);
+    _erThumbTimer = ErThumbs.startCapture(_ffi, widget.id, _erThumbKey);
     _ffi.imageModel.addCallbackOnFirstImage((String peerId) {
+      erSetSessionWindowTitle(widget.id, _ffi);
       _ffi.canvasModel.activateLocalCursor();
       showKBLayoutTypeChooserIfNeeded(
           _ffi.ffiModel.pi.platform, _ffi.dialogManager);
@@ -637,6 +643,7 @@ class _RemotePageState extends State<RemotePage>
   @override
   Future<void> dispose() async {
     final closeSession = closeSessionOnDispose.remove(widget.id) ?? true;
+    ErThumbs.stopCapture(_erThumbTimer, _ffi, widget.id);
 
     // https://github.com/flutter/flutter/issues/64935
     if (isMacOS) {
@@ -951,7 +958,9 @@ class _RemotePageState extends State<RemotePage>
         onExit: (evt) {
           if (!isWeb) bind.hostStopSystemKeyPropagate(stopped: true);
         },
-        child: _ViewStyleUpdater(
+        child: RepaintBoundary(
+          key: _erThumbKey,
+          child: _ViewStyleUpdater(
           canvasModel: _ffi.canvasModel,
           inputModel: _ffi.inputModel,
           child: Builder(builder: (context) {
@@ -975,6 +984,7 @@ class _RemotePageState extends State<RemotePage>
                     }),
             );
           }),
+        ),
         ),
       )
     ];

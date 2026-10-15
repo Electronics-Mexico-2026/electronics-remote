@@ -10,6 +10,7 @@ import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/models/input_model.dart';
 import 'package:flutter_hbb/models/state_model.dart';
 import 'package:flutter_hbb/desktop/pages/remote_page.dart';
+import 'package:flutter_hbb/desktop/er/er_session_menu.dart';
 import 'package:flutter_hbb/desktop/widgets/remote_toolbar.dart';
 import 'package:flutter_hbb/desktop/widgets/tabbar_widget.dart';
 import 'package:flutter_hbb/desktop/widgets/material_mod_popup_menu.dart'
@@ -71,8 +72,10 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
           final ffi = remotePage.ffi;
           bind.setCurSessionId(sessionId: ffi.sessionId);
         }
-        WindowController.fromWindowId(params['windowId'])
-            .setTitle(getWindowNameWithId(id));
+        WindowController.fromWindowId(params['windowId']).setTitle(
+            remotePage is RemotePage
+                ? erSessionWindowTitle(id, remotePage.ffi)
+                : getWindowNameWithId(id));
         UnreadChatCountState.find(id).value = 0;
       };
       tabController.add(TabInfo(

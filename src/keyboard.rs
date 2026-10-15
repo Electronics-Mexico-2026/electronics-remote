@@ -627,6 +627,14 @@ fn start_grab_loop() {
                 return None;
             }
 
+            // Electronics Remote: F8 no se manda al equipo remoto; pasa a la
+            // ventana para abrir el menú de sesión (como RealVNC). El menú
+            // tiene «Enviar F8».
+            #[cfg(feature = "flutter")]
+            if key == Key::F8 && KEYBOARD_HOOKED.load(Ordering::SeqCst) {
+                return Some(event);
+            }
+
             let res = if KEYBOARD_HOOKED.load(Ordering::SeqCst) {
                 client::process_event(&get_keyboard_mode(), &event, None);
                 if is_press {
