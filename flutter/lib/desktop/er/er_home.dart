@@ -170,6 +170,16 @@ class _ErHomeState extends State<ErHome> with WindowListener {
   }
 
   void _load(PeerTabIndex t, {required bool force}) {
+    final user = gFFI.userModel;
+    if (force &&
+        (t == PeerTabIndex.group || t == PeerTabIndex.ab) &&
+        user.isLogin &&
+        user.networkError.isNotEmpty) {
+      // Con un error de red anterior grupos y libreta no piden nada; pedir de
+      // nuevo el usuario borra el error y al terminar jala los dos.
+      user.refreshCurrentUser();
+      return;
+    }
     switch (t) {
       case PeerTabIndex.recent:
         bind.mainLoadRecentPeers();

@@ -53,11 +53,13 @@ class ErMobileShell extends StatefulWidget {
   State<ErMobileShell> createState() => _ErMobileShellState();
 }
 
-class _ErMobileShellState extends State<ErMobileShell> {
+class _ErMobileShellState extends State<ErMobileShell>
+    with WidgetsBindingObserver {
   final _search = TextEditingController();
   final _searchFocus = FocusNode();
   bool _searching = false;
   StreamSubscription? _uniLinks;
+  Timer? _autoRefresh;
 
   PeerTabModel get _tabs => gFFI.peerTabModel;
 
@@ -66,10 +68,33 @@ class _ErMobileShellState extends State<ErMobileShell> {
     super.initState();
     // Lo mismo que hacía ConnectionPage (la vista que esta reemplaza).
     _uniLinks = listenUniLinks();
+    WidgetsBinding.instance.addObserver(this);
+    _autoRefresh = Timer.periodic(
+        const Duration(seconds: 60), (_) => _refreshSilently());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _refreshSilently();
+  }
+
+  /// Al volver a la app y cada minuto con la lista a la vista: la sección
+  /// actual y el estado en línea, sin avisos (sin red solo se queda la lista
+  /// que ya había).
+  void _refreshSilently() {
+    if (!mounted || widget.selectedIndex != 0 || !stateGlobal.isInMainPage) {
+      return;
+    }
+    if (WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
+      return;
+    }
+    _load(PeerTabIndex.values[_tabs.currentTab], force: true, quiet: true);
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _autoRefresh?.cancel();
     _uniLinks?.cancel();
     _search.dispose();
     _searchFocus.dispose();
@@ -104,7 +129,10 @@ class _ErMobileShellState extends State<ErMobileShell> {
       _tabs.setCurrentTabCachedPeers([]);
     }
     _tabs.setCurrentTab(t.index);
-    _load(t, force: false);
+    // Las del panel se piden de nuevo al entrar: un equipo que se dio de
+    // alta o de baja después del inicio de sesión aparece sin hacer nada.
+    _load(t,
+        force: t == PeerTabIndex.group || t == PeerTabIndex.ab, quiet: true);
     widget.onSelect(0);
     setState(() {});
     await bind.setLocalFlutterOption(
@@ -118,7 +146,19 @@ class _ErMobileShellState extends State<ErMobileShell> {
     _selectSection(PeerTabIndex.group, keepGroup: true);
   }
 
-  Future<void> _load(PeerTabIndex t, {required bool force}) async {
+  Future<void> _load(PeerTabIndex t,
+      {required bool force, bool quiet = false}) async {
+    final user = gFFI.userModel;
+    if (force &&
+        (t == PeerTabIndex.group || t == PeerTabIndex.ab) &&
+        user.isLogin &&
+        user.networkError.isNotEmpty) {
+      // Con un error de red anterior los modelos del panel no piden nada y
+      // la lista se quedaba vieja para siempre; pedir de nuevo el usuario
+      // borra el error y, al terminar, jala libreta y grupos.
+      user.refreshCurrentUser();
+      return;
+    }
     switch (t) {
       case PeerTabIndex.recent:
         await bind.mainLoadRecentPeers();
@@ -132,13 +172,33 @@ class _ErMobileShellState extends State<ErMobileShell> {
         break;
       case PeerTabIndex.ab:
         await gFFI.abModel.pullAb(
-            force: force ? ForcePullAb.listAndCurrent : null, quiet: false);
+            force: force ? ForcePullAb.listAndCurrent : null, quiet: quiet);
         break;
       case PeerTabIndex.group:
-        await gFFI.groupModel.pull(force: force);
+        await gFFI.groupModel.pull(force: force, quiet: quiet);
         break;
     }
-    if (force) ErState.thumbsVersion.value++;
+    if (force) {
+      ErState.thumbsVersion.value++;
+      // Todos los de la sección, también los que «Solo en línea» esconde.
+      final ids = _sectionPeers(t).map((e) => e.id).toList();
+      if (ids.isNotEmpty) bind.queryOnlines(ids: ids);
+    }
+  }
+
+  List<Peer> _sectionPeers(PeerTabIndex t) {
+    switch (t) {
+      case PeerTabIndex.recent:
+        return gFFI.recentPeersModel.peers;
+      case PeerTabIndex.fav:
+        return gFFI.favoritePeersModel.peers;
+      case PeerTabIndex.lan:
+        return gFFI.lanPeersModel.peers;
+      case PeerTabIndex.ab:
+        return gFFI.abModel.peersModel.peers;
+      case PeerTabIndex.group:
+        return gFFI.groupModel.peersModel.peers;
+    }
   }
 
   void _closeSearch() {
@@ -373,7 +433,7 @@ class _ErMobileShellState extends State<ErMobileShell> {
                     !login) {
                   return _loginPrompt(context);
                 }
-                return RefreshIndicator(
+                final list = RefreshIndicator(
                   color: ErColors.cyan,
                   backgroundColor: ErColors.surface,
                   onRefresh: () => _load(tab, force: true),
@@ -382,12 +442,39 @@ class _ErMobileShellState extends State<ErMobileShell> {
                     tab: tab,
                   ),
                 );
+                if (tab != PeerTabIndex.group && tab != PeerTabIndex.ab) {
+                  return list;
+                }
+                return Column(children: [
+                  _panelErrorBanner(context, tab),
+                  Expanded(child: list),
+                ]);
               }),
             ),
           ),
         ),
       ],
     );
+  }
+
+  /// Una línea fija (no un aviso por intento) cuando el panel no respondió:
+  /// la lista que se ve puede estar vieja.
+  Widget _panelErrorBanner(BuildContext context, PeerTabIndex tab) {
+    return Obx(() {
+      final err = gFFI.userModel.networkError.value.isNotEmpty ||
+          (tab == PeerTabIndex.group &&
+              gFFI.groupModel.groupLoadError.value.isNotEmpty);
+      if (!err) return const SizedBox.shrink();
+      return Container(
+        width: double.infinity,
+        color: ErColors.surface,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Text(
+            'No se pudo leer el panel. Jala hacia abajo para reintentar.',
+            style: erTextStyle(context,
+                size: 13, color: Colors.white.withOpacity(0.8))),
+      );
+    });
   }
 
   Widget _loginPrompt(BuildContext context) {

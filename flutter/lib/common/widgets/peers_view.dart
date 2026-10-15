@@ -192,7 +192,7 @@ class _PeersViewState extends State<_PeersView>
       child: Consumer<Peers>(builder: (context, peers, child) {
         if (peers.peers.isEmpty) {
           gFFI.peerTabModel.setCurrentTabCachedPeers([]);
-          return Center(
+          final empty = Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -211,6 +211,14 @@ class _PeersViewState extends State<_PeersView>
                   ),
                 ),
               ],
+            ),
+          );
+          if (!widget.erMobileGrid) return empty;
+          // Desplazable para que «jalar para actualizar» funcione sin equipos.
+          return LayoutBuilder(
+            builder: (context, c) => ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              children: [SizedBox(height: c.maxHeight, child: empty)],
             ),
           );
         } else {
