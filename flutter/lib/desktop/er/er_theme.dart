@@ -37,6 +37,9 @@ const String kErOptShowStatusbar = 'er-show-statusbar';
 const String kErOptOnlineOnly = 'er-filter-online';
 const String kErOptHideThumbs = 'er-hide-thumbs';
 const String kErOptAskRemember = 'er-ask-remember-password';
+// Último valor elegido en «Recordar contraseña» (encendido de fábrica): el
+// interruptor ya no arranca apagado en cada equipo nuevo.
+const String kErOptRememberDefault = 'er-remember-password-default';
 const String kErOptSection = 'er-sidebar-section';
 
 String erGetOpt(String key) => bind.mainGetLocalOption(key: key);

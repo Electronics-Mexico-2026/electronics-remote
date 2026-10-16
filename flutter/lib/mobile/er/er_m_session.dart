@@ -122,7 +122,8 @@ Future<void> erMobilePasswordDialog(
   bool rememberInit,
 ) async {
   final askRemember = erOptOn(kErOptAskRemember);
-  var remember = askRemember && rememberInit;
+  var remember =
+      askRemember && (rememberInit || erOptOn(kErOptRememberDefault));
   var obscure = true;
   final id = gFFI.id;
   var alias = '';
@@ -143,6 +144,7 @@ Future<void> erMobilePasswordDialog(
     submit() {
       final password = passwordController.text.trim();
       if (password.isEmpty) return;
+      if (askRemember) erSetOpt(kErOptRememberDefault, remember ? 'Y' : 'N');
       gFFI.login('', '', sessionId, password, remember);
       close();
       dialogManager.showLoading(translate('Logging in...'),
