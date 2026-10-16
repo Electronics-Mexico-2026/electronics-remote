@@ -580,7 +580,7 @@ class _ErMobileShellState extends State<ErMobileShell>
       child: ChangeNotifierProvider.value(
         value: gFFI.peerTabModel,
         child: Consumer<PeerTabModel>(
-          builder: (context, model, _) => Obx(() {
+          builder: (context, model, _) => Builder(builder: (context) {
             final cur = PeerTabIndex.values[model.currentTab];
             final onPeers = idx == 0;
             Widget section(PeerTabIndex t, IconData icon, String text) =>
