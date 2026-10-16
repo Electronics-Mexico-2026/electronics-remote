@@ -175,8 +175,14 @@ class ErKeyBuffer {
     _down = true;
     // Lo mandado sin imagen posterior se vuelve a poner al frente.
     final old = now().subtract(resendWindow);
-    final unconfirmed = _recent.where((e) => e.at.isAfter(old)).toList();
+    var unconfirmed = _recent.where((e) => e.at.isAfter(old)).toList();
     _recent.clear();
+    // Un Enter o un atajo (Ctrl+V, Alt+F4…) repetido hace daño si sí había
+    // llegado: no se reenvía ni lo de antes, solo lo escrito después.
+    final last = unconfirmed.lastIndexWhere((e) =>
+        e.ctrl || e.alt || e.command || e.key == 'VK_RETURN' ||
+        (e.text?.contains('\n') ?? false));
+    if (last >= 0) unconfirmed = unconfirmed.sublist(last + 1);
     if (unconfirmed.isNotEmpty) {
       _pending.insertAll(0, unconfirmed);
       if (_pending.length > maxPending) {

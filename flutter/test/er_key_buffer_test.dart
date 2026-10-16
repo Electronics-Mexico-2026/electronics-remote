@@ -44,6 +44,17 @@ void main() {
     expect(sent, ['b', 'c']);
   });
 
+  test('un Enter sin confirmar no se reenvía (ni lo de antes)', () async {
+    var t = DateTime(2026, 10, 16, 14, 0, 0);
+    final b = ErKeyBuffer(now: () => t);
+    for (final n in ['l', 's', 'VK_RETURN', 'p']) {
+      expect(b.offer(k(n, t)), isFalse);
+      t = t.add(const Duration(milliseconds: 100));
+    }
+    b.markDown();
+    expect(b.pendingForTest.map((e) => e.key), ['p']);
+  });
+
   test('el teclado reemplaza o borra varias letras: se replica igual', () {
     final base = '1' * 8;
     // agregar una letra

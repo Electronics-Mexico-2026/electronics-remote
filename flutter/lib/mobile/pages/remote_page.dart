@@ -22,6 +22,7 @@ import '../../models/input_model.dart';
 import '../../models/model.dart';
 import '../../models/er_key_buffer.dart';
 import '../../models/er_key_buffer_ffi.dart';
+import '../../models/er_ime_field.dart';
 import '../../models/platform_model.dart';
 import '../../utils/image.dart';
 import '../widgets/dialog.dart';
@@ -82,6 +83,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
   // Electronics Remote: el teclado estaba abierto cuando se cayó la conexión;
   // al volver la imagen se vuelve a abrir solo.
   var _erKeyboardWanted = false;
+  final ErImeField _erIme = ErImeField(initText);
 
   Worker? _waylandKeyboardGateWorker;
   bool _waylandKeyboardGateInitialized = false;
@@ -398,16 +400,13 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
   /// varias letras de golpe; antes eso mandaba un solo retroceso o nada y lo
   /// del equipo quedaba distinto a lo escrito.
   void _erHandleAndroidSoftKeyboardInput(String newValue) {
-    var oldValue = _value;
+    final oldValue = _value;
     _value = newValue;
-    if (oldValue.isNotEmpty &&
-        newValue.isNotEmpty &&
-        oldValue[0] == '1' &&
-        newValue[0] != '1') {
-      // clipboard
-      oldValue = '';
-    }
-    final d = ErTextDiff.of(oldValue, newValue);
+    // Con el cursor del teclado fuera del final (Samsung lo mueve) la
+    // diferencia por largo o por prefijo mandaba «1» del relleno.
+    final v = _textController.value;
+    final d = _erIme.apply(newValue,
+        v.text == newValue && v.selection.isValid ? v.selection.end : -1);
     for (var i = 0; i < d.backspaces; i++) {
       inputModel.inputKey('VK_BACK');
     }
@@ -436,12 +435,13 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
   }
 
   /// El campo oculto se rellena cuando ya casi no le quedan «1» que borrar
-  /// (si se vacía, el retroceso deja de llegar) o cuando creció demasiado.
+  /// (si se vacía, el retroceso deja de llegar), cuando creció demasiado o
+  /// cuando el cursor quedó fuera del final.
   void _erRefillIfNeeded() {
     final v = _textController.value;
     if (v.isComposingRangeValid) return;
-    final n = v.text.length;
-    if (n >= 256 && n <= 8192) return;
+    if (!_erIme.needsReset) return;
+    _erIme.reset();
     _value = initText;
     _textController.value = TextEditingValue(
         text: initText,
@@ -503,6 +503,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
     gFFI.invokeMethod("enable_soft_keyboard", true);
     // destroy first, so that our _value trick can work
     _value = initText;
+    _erIme.reset();
     _textController.text = _value;
     setState(() => _showEdit = false);
     _timer?.cancel();
