@@ -66,6 +66,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
   bool _showGestureHelp = false;
   String _value = '';
   Orientation? _currentOrientation;
+  Orientation? _erWindowOrientation;
   final _uniqueKey = UniqueKey();
   Timer? _iosKeyboardWorkaroundTimer;
 
@@ -521,6 +522,15 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
                         : SafeArea(
                             child:
                                 OrientationBuilder(builder: (ctx, orientation) {
+                              if (isAndroid &&
+                                  _currentOrientation != orientation &&
+                                  !_erWindowRotated(ctx)) {
+                                // Solo cambió el alto libre (se abrió o cerró
+                                // el teclado; en el Fold abierto eso voltea
+                                // la orientación): no se reajusta la vista,
+                                // se queda el zoom que puso el usuario.
+                                _currentOrientation = orientation;
+                              }
                               if (_currentOrientation != orientation) {
                                 Timer(const Duration(milliseconds: 200), () {
                                   gFFI.dialogManager
@@ -546,6 +556,17 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
             )),
           ))),
     );
+  }
+
+  /// Android: ¿giró la ventana de verdad? El tamaño de la ventana no cambia
+  /// con el teclado; el del cuerpo sí.
+  bool _erWindowRotated(BuildContext ctx) {
+    final s = MediaQueryData.fromView(View.of(ctx)).size;
+    final o = s.width > s.height ? Orientation.landscape : Orientation.portrait;
+    final rotated = _erWindowOrientation != null && _erWindowOrientation != o;
+    final first = _erWindowOrientation == null;
+    _erWindowOrientation = o;
+    return rotated || (first && _currentOrientation == null);
   }
 
   /// Android: barra flotante, teclas, modo mouse e información tipo RealVNC.
