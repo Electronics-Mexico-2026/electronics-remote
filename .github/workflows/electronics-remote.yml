@@ -772,7 +772,8 @@ jobs:
           $app = 'ElectronicsRemote'
           gh release download --repo $env:GITHUB_REPOSITORY --pattern "$app-x64.exe" -D old
           if (-not (Test-Path "old/$app-x64.exe")) { Write-Host "::warning::no hay release publicado para probar"; exit 0 }
-          Start-Process -FilePath (Resolve-Path "old/$app-x64.exe") -ArgumentList '--silent-install' -Wait -ErrorAction SilentlyContinue
+          # El empaquetador se queda vivo tras instalar: no esperar a que salga.
+          $null = (Start-Process -FilePath (Resolve-Path "old/$app-x64.exe") -ArgumentList '--silent-install' -PassThru).WaitForExit(180000)
           $exe = Join-Path (Join-Path $env:ProgramFiles $app) "$app.exe"
           for ($i = 0; $i -lt 60; $i++) { if ((Get-Service $app -ErrorAction SilentlyContinue).Status -eq 'Running' -and (Test-Path $exe)) { break }; Start-Sleep 5 }
           if (-not (Test-Path $exe)) { Write-Host "::error::no se instalo la version publicada"; exit 1 }

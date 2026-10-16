@@ -1,0 +1,72 @@
+name: Electronics Remote - prueba de actualizacion
+
+# Instala una version vieja publicada y la actualiza con los artefactos de
+# una corrida del build, por el mismo camino que usa el servicio (--update).
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "ID de la corrida del build con el .exe nuevo"
+        type: string
+        required: true
+      old_tag:
+        description: "Tag del release viejo a instalar primero"
+        type: string
+        required: true
+      app:
+        description: "ElectronicsRemote o ElectronicsRemoteEquipo"
+        type: string
+        default: ElectronicsRemote
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  test-update:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: electronics-remote-windows-x86_64
+          path: dist
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Aislar la VM del servidor propio
+        shell: pwsh
+        run: |
+          New-NetFirewallRule -DisplayName 'ER-CI-bloquear-servidor' -Direction Outbound -Action Block -RemoteAddress 157.90.22.164 | Out-Null
+          Add-Content -Path "$env:windir\System32\drivers\etc\hosts" -Value "0.0.0.0 remote.electronicsmexico.site"
+
+      - name: Instalar la vieja y actualizar con la nueva
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OLD_TAG: ${{ inputs.old_tag }}
+          APP: ${{ inputs.app }}
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $app = $env:APP
+          gh release download $env:OLD_TAG --repo $env:GITHUB_REPOSITORY --pattern "$app-x64.exe" -D old
+          $null = (Start-Process -FilePath (Resolve-Path "old/$app-x64.exe") -ArgumentList '--silent-install' -PassThru).WaitForExit(180000)
+          $exe = Join-Path (Join-Path $env:ProgramFiles $app) "$app.exe"
+          for ($i = 0; $i -lt 60; $i++) { if ((Get-Service $app -ErrorAction SilentlyContinue).Status -eq 'Running' -and (Test-Path $exe)) { break }; Start-Sleep 5 }
+          if (-not (Test-Path $exe)) { Write-Host "::error::no se instalo $env:OLD_TAG"; exit 1 }
+          $antes = (Get-FileHash $exe).Hash
+          Write-Host "instalada $env:OLD_TAG : $antes"
+          $p = Start-Process -FilePath (Resolve-Path "dist/$app-x64.exe") -ArgumentList '--update' -PassThru
+          $null = $p.WaitForExit(240000)
+          $ok = $false
+          for ($i = 0; $i -lt 60; $i++) {
+            Start-Sleep 5
+            if ((Test-Path $exe) -and ((Get-FileHash $exe).Hash -ne $antes) -and ((Get-Service $app -ErrorAction SilentlyContinue).Status -eq 'Running')) { $ok = $true; break }
+          }
+          Get-ChildItem (Split-Path $exe) | Select-Object -First 15 | Format-Table Name, Length, LastWriteTime | Out-String | Write-Host
+          Get-CimInstance Win32_Service -Filter "Name='$app'" | Format-List Name, State, StartMode, StartName, PathName | Out-String | Write-Host
+          foreach ($d in @("C:\Windows\System32\config\systemprofile\AppData\Roaming\$app\log", "C:\Windows\ServiceProfiles\LocalService\AppData\Roaming\$app\log", "$env:APPDATA\$app\log")) {
+            if (Test-Path $d) { Get-ChildItem -Recurse $d -Filter *.log | ForEach-Object { Write-Host "== $($_.FullName)"; Get-Content $_.FullName -Tail 40 } }
+          }
+          if (-not $ok) { Write-Host "::error::--update no reemplazo el exe instalado o el servicio no quedo corriendo"; exit 1 }
+          Write-Host "OK: $env:OLD_TAG -> nueva, en silencio, servicio corriendo"
