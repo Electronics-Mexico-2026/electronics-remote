@@ -25,6 +25,11 @@ const WEBRTC_SUSPECT_GRACE: Duration = Duration::from_secs(3);
 // KCP gets no such hint, only how long since a packet arrived; its endpoint pings an idle peer
 // about every 2s, so this is several missed pings, and matches the 8s WebRTC arrives at.
 const KCP_PEER_SILENCE_LIMIT: Duration = Duration::from_secs(8);
+// Electronics Remote: on a phone a TCP/relay link that died (network switch, carrier NAT
+// timeout) is otherwise noticed only by the 30s watchdog, up to a minute of typing into
+// nothing. The peer sends a TestDelay about every second, so this is many missed ones.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+const ER_MOBILE_PEER_SILENCE_LIMIT: Duration = Duration::from_secs(10);
 #[cfg(feature = "unix-file-copy-paste")]
 use crate::{clipboard::try_empty_clipboard_files, clipboard_file::unix_file_clip};
 use base::{
@@ -355,6 +360,13 @@ impl<T: InvokeUiSession> Remote<T> {
                                     .as_ref()
                                     .and_then(|k| k.peer_silent_for())
                                     .map_or(false, |silent| silent >= KCP_PEER_SILENCE_LIMIT);
+                            #[cfg(any(target_os = "android", target_os = "ios"))]
+                            if !peer_gone
+                                && received
+                                && last_recv_time.elapsed() >= ER_MOBILE_PEER_SILENCE_LIMIT
+                            {
+                                peer_gone = true;
+                            }
                             if peer_gone {
                                 log::info!("Peer stopped answering, reconnecting");
                                 #[cfg(feature = "flutter")]

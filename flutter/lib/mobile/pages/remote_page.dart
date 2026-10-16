@@ -20,6 +20,8 @@ import '../../common/widgets/dialog.dart';
 import '../../common/widgets/remote_input.dart';
 import '../../models/input_model.dart';
 import '../../models/model.dart';
+import '../../models/er_key_buffer.dart';
+import '../../models/er_key_buffer_ffi.dart';
 import '../../models/platform_model.dart';
 import '../../utils/image.dart';
 import '../widgets/dialog.dart';
@@ -77,6 +79,9 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
   final FocusNode _mobileFocusNode = FocusNode();
   final FocusNode _physicalFocusNode = FocusNode();
   var _showEdit = false; // use soft keyboard
+  // Electronics Remote: el teclado estaba abierto cuando se cayó la conexión;
+  // al volver la imagen se vuelve a abrir solo.
+  var _erKeyboardWanted = false;
 
   Worker? _waylandKeyboardGateWorker;
   bool _waylandKeyboardGateInitialized = false;
@@ -132,13 +137,19 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
       if (gFFI.recordingModel.start) {
         showToast(translate('Automatically record outgoing sessions'));
       }
-      _disableAndroidSoftKeyboard(
-          isKeyboardVisible: keyboardVisibilityController.isVisible);
+      if (isAndroid && _erKeyboardWanted && inputModel.erKeys.isDown) {
+        _openKeyboardUnlocked();
+      } else {
+        _disableAndroidSoftKeyboard(
+            isKeyboardVisible: keyboardVisibilityController.isVisible);
+      }
       if (isAndroid) erMobileFitOnOpen(gFFI);
+      if (isAndroid) erMobileApplyQualityDefault(gFFI, widget.id);
     });
     WidgetsBinding.instance.addObserver(this);
 
     inputModel.keyboardInputAllowed = true;
+    inputModel.erKeys.onChanged = erKeyBufferNotice();
 
     // Wayland sessions may use clipboard-based text input on the controlled side.
     // Require explicit user confirmation before allowing soft-keyboard and
@@ -157,6 +168,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
   Future<void> dispose() async {
     if (isAndroid) ErThumbs.stopCapture(_erThumbTimer, gFFI, widget.id);
     WidgetsBinding.instance.removeObserver(this);
+    inputModel.erKeys.onChanged = null;
     // Close the session up-front. `gFFI.close()` below only calls `sessionClose`
     // after several awaits (canvas save, image update, the `enable_soft_keyboard`
     // platform call), so if the app is backgrounded while this page is disposing,
@@ -253,6 +265,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
       );
 
   void onSoftKeyboardChanged(bool visible) {
+    if (!visible && !inputModel.erKeys.isDown) _erKeyboardWanted = false;
     if (!visible) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual, overlays: []);
       // [pi.version.isNotEmpty] -> check ready or not, avoid login without soft-keyboard
@@ -333,7 +346,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
 
     // Input the new string.
     if (newStr.length > 1) {
-      bind.sessionInputString(sessionId: sessionId, value: newStr);
+      inputModel.erInputString(newStr);
     } else {
       inputChar(newStr);
     }
@@ -369,15 +382,70 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
                 content == '（）' ||
                 content == '【】')) {
           // can not only input content[0], because when input ], [ are also auo insert, which cause ] never be input
-          bind.sessionInputString(sessionId: sessionId, value: content);
+          inputModel.erInputString(content);
           _openKeyboardUnlocked();
           return;
         }
-        bind.sessionInputString(sessionId: sessionId, value: content);
+        inputModel.erInputString(content);
       } else {
         inputChar(content);
       }
     }
+  }
+
+  /// Electronics Remote (Android): compara por prefijo común. El teclado del
+  /// celular a veces reemplaza una palabra (sugerencia, autocorrector) o borra
+  /// varias letras de golpe; antes eso mandaba un solo retroceso o nada y lo
+  /// del equipo quedaba distinto a lo escrito.
+  void _erHandleAndroidSoftKeyboardInput(String newValue) {
+    var oldValue = _value;
+    _value = newValue;
+    if (oldValue.isNotEmpty &&
+        newValue.isNotEmpty &&
+        oldValue[0] == '1' &&
+        newValue[0] != '1') {
+      // clipboard
+      oldValue = '';
+    }
+    final d = ErTextDiff.of(oldValue, newValue);
+    for (var i = 0; i < d.backspaces; i++) {
+      inputModel.inputKey('VK_BACK');
+    }
+    final content = d.insert;
+    if (content.length > 1) {
+      inputModel.erInputString(content);
+      if (d.backspaces == 0 &&
+          oldValue != '' &&
+          content.length == 2 &&
+          (content == '""' ||
+              content == '()' ||
+              content == '[]' ||
+              content == '<>' ||
+              content == "{}" ||
+              content == '”“' ||
+              content == '《》' ||
+              content == '（）' ||
+              content == '【】')) {
+        _openKeyboardUnlocked();
+        return;
+      }
+    } else if (content.isNotEmpty) {
+      inputChar(content);
+    }
+    _erRefillIfNeeded();
+  }
+
+  /// El campo oculto se rellena cuando ya casi no le quedan «1» que borrar
+  /// (si se vacía, el retroceso deja de llegar) o cuando creció demasiado.
+  void _erRefillIfNeeded() {
+    final v = _textController.value;
+    if (v.isComposingRangeValid) return;
+    final n = v.text.length;
+    if (n >= 256 && n <= 8192) return;
+    _value = initText;
+    _textController.value = TextEditingValue(
+        text: initText,
+        selection: TextSelection.collapsed(offset: initText.length));
   }
 
   // handle mobile virtual keyboard
@@ -387,6 +455,8 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
     }
     if (isIOS) {
       _handleIOSSoftKeyboardInput(newValue);
+    } else if (isAndroid) {
+      _erHandleAndroidSoftKeyboardInput(newValue);
     } else {
       _handleNonIOSSoftKeyboardInput(newValue);
     }
@@ -429,6 +499,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
 
   void _openKeyboardUnlocked() {
     inputModel.keyboardInputAllowed = true;
+    _erKeyboardWanted = true;
     gFFI.invokeMethod("enable_soft_keyboard", true);
     // destroy first, so that our _value trick can work
     _value = initText;

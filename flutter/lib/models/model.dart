@@ -24,6 +24,7 @@ import 'package:flutter_hbb/models/server_model.dart';
 import 'package:flutter_hbb/models/user_model.dart';
 import 'package:flutter_hbb/models/state_model.dart';
 import 'package:flutter_hbb/models/desktop_render_texture.dart';
+import 'package:flutter_hbb/models/er_key_buffer_ffi.dart';
 import 'package:flutter_hbb/models/terminal_model.dart';
 import 'package:flutter_hbb/common/shared_state.dart';
 import 'package:flutter_hbb/utils/multi_window_manager.dart';
@@ -912,6 +913,16 @@ class FfiModel with ChangeNotifier {
         (type is String && type.contains('error'))) {
       parent.target?.inputModel.setRelativeMouseMode(false);
     }
+    if (isMobile) {
+      // Lo escrito se guarda si la conexión se cae, pero no si el equipo se
+      // está reiniciando: al volver estaría en la pantalla de inicio.
+      if (type == 'restarting' || title == 'Restarting remote device') {
+        parent.target?.inputModel.erKeys.clear();
+      } else if (title == 'Connection Error' ||
+          (type == 'restarting-show' && title == 'Connecting...')) {
+        parent.target?.inputModel.erKeys.markDown();
+      }
+    }
 
     if (type == 're-input-password') {
       wrongPasswordDialog(sessionId, dialogManager, type, title, text);
@@ -1137,6 +1148,7 @@ class FfiModel with ChangeNotifier {
       bool forceRelay) {
     // Disable relative mouse mode before reconnecting to ensure cursor is released.
     parent.target?.inputModel.setRelativeMouseMode(false);
+    if (isMobile) parent.target?.inputModel.erKeys.markDown();
     _cancelPendingMonitorRestore();
     bind.sessionReconnect(sessionId: sessionId, forceRelay: forceRelay);
     clearPermissions();
@@ -4338,6 +4350,7 @@ class FFI {
   }
 
   Future<void> onEvent2UIRgba() async {
+    if (isMobile) inputModel.erKeys.onFrame();
     if (ffiModel.waitForImageDialogShow.isTrue) {
       ffiModel.waitForImageDialogShow.value = false;
       ffiModel.waitForImageTimer?.cancel();
@@ -4357,6 +4370,7 @@ class FFI {
         }
       } finally {
         _applyPendingMonitorRestore();
+        if (isMobile) erFlushSavedKeys(this);
       }
     }
   }
@@ -4413,6 +4427,7 @@ class FFI {
           ffiModel.pi.currentDisplay);
     }
     imageModel.callbacksOnFirstImage.clear();
+    if (isMobile) inputModel.erKeys.clear();
     await imageModel.update(null);
     cursorModel.clear();
     ffiModel.clear();

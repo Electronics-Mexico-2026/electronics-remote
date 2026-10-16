@@ -18,6 +18,7 @@ import '../../models/platform_model.dart';
 import '../../models/state_model.dart';
 import 'input_modifier_utils.dart';
 import 'relative_mouse_model.dart';
+import 'er_key_buffer.dart';
 import '../common.dart';
 import '../common/er_f8.dart';
 import '../consts.dart';
@@ -480,6 +481,36 @@ class InputModel {
   bool keyboardInputAllowed = true;
 
   bool get keyboardPerm => parent.target!.ffiModel.keyboard;
+
+  /// Electronics Remote (celular): lo que se escribe sin conexión se guarda y
+  /// se manda al reconectar.
+  final ErKeyBuffer erKeys = ErKeyBuffer();
+
+  /// Texto del teclado del celular (varias letras de golpe), por el búfer.
+  void erInputString(String value) {
+    if (value.isEmpty || isViewCamera) return;
+    if (erKeys.offer(ErKeyEntry.text(value, at: DateTime.now()))) return;
+    if (!keyboardPerm) return;
+    bind.sessionInputString(sessionId: sessionId, value: value);
+  }
+
+  /// Manda lo guardado tal cual se guardó (con sus modificadores).
+  void erSendSaved(ErKeyEntry e) {
+    if (!keyboardPerm || isViewCamera) return;
+    if (e.text != null) {
+      bind.sessionInputString(sessionId: sessionId, value: e.text!);
+      return;
+    }
+    bind.sessionInputKey(
+        sessionId: sessionId,
+        name: e.key!,
+        down: e.down,
+        press: e.press,
+        alt: e.alt,
+        ctrl: e.ctrl,
+        shift: e.shift,
+        command: e.command);
+  }
   String get id => parent.target?.id ?? '';
   String? get peerPlatform => parent.target?.ffiModel.pi.platform;
   String get peerVersion => parent.target?.ffiModel.pi.version ?? '';
@@ -1042,6 +1073,16 @@ class InputModel {
   /// [down] indicates the key's state(down or up).
   /// [press] indicates a click event(down and up).
   void inputKey(String name, {bool? down, bool? press}) {
+    if (isMobile && !isViewCamera && erKeys.offer(ErKeyEntry.key(name,
+        down: down ?? false,
+        press: press ?? true,
+        alt: alt,
+        ctrl: ctrl,
+        shift: shift,
+        command: command,
+        at: DateTime.now()))) {
+      return;
+    }
     if (!keyboardPerm) return;
     if (isViewCamera) return;
     bind.sessionInputKey(

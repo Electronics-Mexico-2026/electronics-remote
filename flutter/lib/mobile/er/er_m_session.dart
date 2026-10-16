@@ -36,6 +36,26 @@ void erMobileApplyMouseDefault() {
   erSetOpt(_kErOptMouseDefault, 'Y');
 }
 
+const String _kErOptQualityDefault = 'er-quality-best-default';
+
+/// Como VNC: nitidez antes que fluidez. «Equilibrada» (la de RustDesk) baja la
+/// calidad cuando hay mucho movimiento y el texto que se desplaza se ve
+/// borroso. Una sola vez por aparato se deja «Mejor calidad» como
+/// predeterminada y una sola vez por equipo se aplica; si la persona después
+/// elige otra en Opciones › Calidad de imagen, se respeta.
+Future<void> erMobileApplyQualityDefault(FFI ffi, String id) async {
+  if (erGetOpt(_kErOptQualityDefault) != 'Y') {
+    await bind.mainSetUserDefaultOption(
+        key: kOptionImageQuality, value: kRemoteImageQualityBest);
+    await erSetOpt(_kErOptQualityDefault, 'Y');
+  }
+  final perPeer = '$_kErOptQualityDefault-$id';
+  if (erGetOpt(perPeer) == 'Y') return;
+  await bind.sessionSetImageQuality(
+      sessionId: ffi.sessionId, value: kRemoteImageQualityBest);
+  await erSetOpt(perPeer, 'Y');
+}
+
 /// Al abrir la sesión, la pantalla del equipo entra ajustada al celular.
 Future<void> erMobileFitOnOpen(FFI ffi) async {
   await bind.sessionSetViewStyle(
@@ -467,10 +487,82 @@ class _ErSessionOverlayState extends State<ErSessionOverlay> {
         if (_keysOn && _canInput)
           Positioned(
               left: 0, right: 0, bottom: 0, child: _keysBar(context, kb)),
+        if (kb && _canInput)
+          Positioned(
+              left: 0, right: 0, bottom: keysH, child: _erTypingPreview()),
         _toolbar(context, size),
         if (_infoOn) ..._infoPanel(context, size),
       ],
     ));
+  }
+
+  /// Como el campo de VNC Viewer: lo que se va escribiendo, arriba del
+  /// teclado. Lo que no ha llegado al equipo (sin conexión) sale en ámbar y se
+  /// manda solo al reconectar.
+  Widget _erTypingPreview() {
+    final buf = _input.erKeys;
+    return AnimatedBuilder(
+      animation: Listenable.merge(
+          [buf.preview, buf.pendingNotifier, buf.downNotifier]),
+      builder: (context, _) {
+        final text = buf.preview.value;
+        final down = buf.downNotifier.value;
+        final pending = buf.pendingNotifier.value;
+        if (text.isEmpty && !down && pending == 0) {
+          return const SizedBox.shrink();
+        }
+        var runes = text.runes.toList();
+        // Solo la cola: en una fila del celular caben ~50 letras.
+        if (runes.length > 60) runes = runes.sublist(runes.length - 60);
+        final cut = (runes.length - pending).clamp(0, runes.length);
+        final sent = String.fromCharCodes(runes.take(cut));
+        final held = String.fromCharCodes(runes.skip(cut));
+        const amber = Color(0xFFF59E0B);
+        return Container(
+          height: 34,
+          color: const Color(0xEE0A0F1C),
+          padding: const EdgeInsets.only(left: 10),
+          child: Row(children: [
+            Icon(down ? Icons.cloud_off : Icons.keyboard,
+                size: 16, color: down ? amber : Colors.white54),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text.rich(
+                TextSpan(children: [
+                  TextSpan(text: sent),
+                  TextSpan(
+                      text: held,
+                      style: const TextStyle(
+                          color: amber,
+                          decoration: TextDecoration.underline)),
+                ]),
+                maxLines: 1,
+                overflow: TextOverflow.clip,
+                softWrap: false,
+                textAlign: TextAlign.right,
+                style: const TextStyle(color: Colors.white, fontSize: 14),
+              ),
+            ),
+            if (down || pending > 0)
+              Padding(
+                padding: const EdgeInsets.only(left: 8),
+                child: Text(
+                    down
+                        ? 'Sin conexión · $pending guardadas'
+                        : 'Enviando $pending…',
+                    style: const TextStyle(color: amber, fontSize: 11)),
+              ),
+            InkWell(
+              onTap: buf.clearPreview,
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 10),
+                child: Icon(Icons.close, size: 16, color: Colors.white54),
+              ),
+            ),
+          ]),
+        );
+      },
+    );
   }
 
   // Barra flotante ------------------------------------------------------
