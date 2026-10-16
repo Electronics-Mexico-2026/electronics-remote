@@ -55,7 +55,70 @@ void erStartUpdate(String releasePageUrl) {
   }
 }
 
-Future<void> erUpdateApk() async {
+/// «1.5.0-er.20», «electronics-remote-1.5.0-er.20» o la URL del release →
+/// [mayor, menor, parche, N]. Lo que no se entiende vale 0.
+List<int> erVersionKey(String v) {
+  var s = v.trim();
+  final slash = s.lastIndexOf('/');
+  if (slash >= 0) s = s.substring(slash + 1);
+  const prefix = 'electronics-remote-';
+  if (s.startsWith(prefix)) s = s.substring(prefix.length);
+  final parts = s.split('-er.');
+  final base = parts[0].split('.').map((e) => int.tryParse(e) ?? 0).toList();
+  while (base.length < 3) {
+    base.add(0);
+  }
+  final build = parts.length > 1 ? (int.tryParse(parts[1]) ?? 0) : 0;
+  return [base[0], base[1], base[2], build];
+}
+
+/// ¿[latest] es más nueva que [current]? Nunca reinstala la misma.
+bool erIsNewer(String latest, String current) {
+  final a = erVersionKey(latest);
+  final b = erVersionKey(current);
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return a[i] > b[i];
+  }
+  return false;
+}
+
+const _kErLastAutoCheck = 'er-update-last-auto-check';
+const Duration kErAutoCheckEvery = Duration(hours: 3);
+
+/// Android: al abrir y al volver a la app (máximo una vez cada 3 h) revisa
+/// releases/latest; si hay una versión más nueva la descarga sola y abre el
+/// instalador del sistema. Android exige que la persona toque «Instalar».
+Future<void> erAutoUpdateAndroid() async {
+  if (!isAndroid || _erChecking) return;
+  final now = DateTime.now().millisecondsSinceEpoch;
+  final last = int.tryParse(bind.mainGetLocalOption(key: _kErLastAutoCheck)) ?? 0;
+  if (now - last < kErAutoCheckEvery.inMilliseconds && now >= last) return;
+  _erChecking = true;
+  try {
+    await bind.mainSetLocalOption(key: _kErLastAutoCheck, value: '$now');
+    await bind.mainSetCommon(key: 'er-check-update', value: '');
+    for (int i = 0; i < 60; i++) {
+      await Future.delayed(const Duration(milliseconds: 500));
+      final st = await bind.mainGetCommon(key: 'er-update-state');
+      if (st == 'checking' || st.isEmpty) continue;
+      if (!st.startsWith('available:')) return;
+      final url = st.substring('available:'.length);
+      if (!erIsNewer(url, erVersion())) return;
+      stateGlobal.updateUrl.value = url;
+      final v = erVersionKey(url);
+      showToast(
+          'Hay versión nueva (er.${v[3]}). Se está descargando; cuando '
+          'aparezca el instalador toca «Instalar».',
+          timeout: const Duration(seconds: 8));
+      await erUpdateApk(quiet: true);
+      return;
+    }
+  } finally {
+    _erChecking = false;
+  }
+}
+
+Future<void> erUpdateApk({bool quiet = false}) async {
   final apkUrl = bind.mainGetCommonSync(key: 'er-apk-url');
   bool ok = false;
   try {
@@ -63,10 +126,11 @@ Future<void> erUpdateApk() async {
   } catch (e) {
     debugPrint('er_update_apk: $e');
   }
+  if (ok && quiet) return;
   if (ok) {
     showToast('Descargando actualizacion... al terminar se abrira el instalador',
         timeout: const Duration(seconds: 5));
-  } else {
+  } else if (!quiet) {
     await launchUrl(Uri.parse(apkUrl), mode: LaunchMode.externalApplication);
   }
 }

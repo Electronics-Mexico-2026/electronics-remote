@@ -78,12 +78,16 @@ class _ErMobileShellState extends State<ErMobileShell>
       if (mounted && widget.selectedIndex == 0) {
         _selectSection(PeerTabIndex.ab);
       }
+      erAutoUpdateAndroid();
     });
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _refreshSilently();
+    if (state == AppLifecycleState.resumed) {
+      _refreshSilently();
+      erAutoUpdateAndroid();
+    }
   }
 
   /// Al volver a la app y cada minuto con la lista a la vista: la sección

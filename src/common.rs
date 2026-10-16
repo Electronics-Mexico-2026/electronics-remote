@@ -3627,6 +3627,15 @@ mod tests {
         assert!(!conn.is_secured());
     }
 
+    #[test]
+    fn test_er_version_key_orders_by_build_number() {
+        assert!(er_version_key("1.5.0-er.20") > er_version_key("1.5.0-er.19"));
+        assert!(er_version_key("1.5.0-er.10") > er_version_key("1.5.0-er.9"));
+        assert!(er_version_key("1.5.0-er.19") == er_version_key("1.5.0-er.19"));
+        assert!(er_version_key("1.5.1-er.1") > er_version_key("1.5.0-er.99"));
+        assert!(er_version_key("1.5.0-er.x") < er_version_key("1.5.0-er.1"));
+    }
+
     #[tokio::test]
     async fn test_secure_tcp_for_secret_does_not_wait_for_a_silent_server() {
         let (key, _) = server_key();

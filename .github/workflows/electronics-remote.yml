@@ -729,6 +729,69 @@ jobs:
           name: logs-silent-install-${{ matrix.prueba }}
           path: test-logs
 
+  # Instala la version publicada (releases/latest) y la actualiza con el .exe
+  # nuevo por el mismo camino que usa el servicio (--update). Informativa: no
+  # frena el release.
+  test-update:
+    name: prueba actualizacion desde releases/latest
+    needs: [build-windows-x64]
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - name: Download Windows build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: electronics-remote-windows-x86_64
+          path: dist
+
+      - name: Aislar la VM del servidor propio
+        shell: pwsh
+        run: |
+          $ips = @()
+          foreach ($v in @($env:RENDEZVOUS_SERVER, $env:API_SERVER)) {
+            if ([string]::IsNullOrWhiteSpace($v)) { continue }
+            $h = (($v -replace '^[a-zA-Z]+://', '') -split '/')[0]
+            if (($h.Split(':')).Count -eq 2) { $h = $h.Split(':')[0] }
+            $p = $null
+            if ([System.Net.IPAddress]::TryParse($h, [ref]$p)) { $ips += $h; continue }
+            try { $ips += [System.Net.Dns]::GetHostAddresses($h) | ForEach-Object { $_.IPAddressToString } } catch {}
+            Add-Content -Path "$env:windir\System32\drivers\etc\hosts" -Value "0.0.0.0 $h"
+          }
+          $ips = $ips | Select-Object -Unique
+          if ($ips.Count -gt 0) {
+            New-NetFirewallRule -DisplayName 'ER-CI-bloquear-servidor' -Direction Outbound -Action Block -RemoteAddress $ips | Out-Null
+            New-NetFirewallRule -DisplayName 'ER-CI-bloquear-servidor-in' -Direction Inbound -Action Block -RemoteAddress $ips | Out-Null
+          }
+
+      - name: Instalar la publicada y actualizar con la nueva
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $app = 'ElectronicsRemote'
+          gh release download --repo $env:GITHUB_REPOSITORY --pattern "$app-x64.exe" -D old
+          if (-not (Test-Path "old/$app-x64.exe")) { Write-Host "::warning::no hay release publicado para probar"; exit 0 }
+          Start-Process -FilePath (Resolve-Path "old/$app-x64.exe") -ArgumentList '--silent-install' -Wait -ErrorAction SilentlyContinue
+          $exe = Join-Path (Join-Path $env:ProgramFiles $app) "$app.exe"
+          for ($i = 0; $i -lt 60; $i++) { if ((Get-Service $app -ErrorAction SilentlyContinue).Status -eq 'Running' -and (Test-Path $exe)) { break }; Start-Sleep 5 }
+          if (-not (Test-Path $exe)) { Write-Host "::error::no se instalo la version publicada"; exit 1 }
+          $antes = (Get-FileHash $exe).Hash
+          Write-Host "instalada la publicada: $antes"
+          $p = Start-Process -FilePath (Resolve-Path "dist/$app-x64.exe") -ArgumentList '--update' -PassThru
+          $null = $p.WaitForExit(300000)
+          $ok = $false
+          for ($i = 0; $i -lt 60; $i++) {
+            Start-Sleep 5
+            if ((Test-Path $exe) -and ((Get-FileHash $exe).Hash -ne $antes) -and ((Get-Service $app -ErrorAction SilentlyContinue).Status -eq 'Running')) { $ok = $true; break }
+          }
+          Get-ChildItem (Split-Path $exe) | Select-Object -First 15 | Format-Table Name, Length, LastWriteTime | Out-String | Write-Host
+          foreach ($d in @("C:\Windows\ServiceProfiles\LocalService\AppData\Roaming\$app\log", "$env:APPDATA\$app\log")) {
+            if (Test-Path $d) { Get-ChildItem -Recurse $d -Filter *.log | ForEach-Object { Write-Host "== $($_.FullName)"; Get-Content $_.FullName -Tail 30 } }
+          }
+          if (-not $ok) { Write-Host "::error::--update no reemplazo el exe instalado o el servicio no quedo corriendo"; exit 1 }
+          Write-Host "OK: actualizado en silencio, servicio corriendo"
+
   release:
     needs: [build-windows-x64, build-android-apk, test-silent-install]
     if: ${{ !cancelled() && (inputs.release_from_run != '' || (needs.test-silent-install.result == 'success' && needs.build-android-apk.result == 'success')) }}
@@ -755,6 +818,10 @@ jobs:
           APK_RESULT: ${{ needs.build-android-apk.result }}
         run: |
           ls -la dist
+          # El actualizador de la app baja estos nombres exactos de releases/latest.
+          for f in ElectronicsRemote.apk ElectronicsRemote-x64.exe ElectronicsRemote-x64.msi                    ElectronicsRemoteEquipo-x64.exe ElectronicsRemoteEquipo-x64.msi; do
+            [ -s "dist/$f" ] || { echo "::error::falta $f (el actualizador no lo encontraria)"; exit 1; }
+          done
           (cd dist && sha256sum * > SHA256SUMS.txt)
           if [ "$ALLOW_PLACEHOLDER" = "1" ]; then
             FLAG=--prerelease

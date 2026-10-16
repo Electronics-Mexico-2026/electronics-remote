@@ -80,6 +80,15 @@ pub const MIN_INTERVAL: Duration = Duration::from_secs(60 * 10);
 /// Retry interval when an update check fails or a session is active (30 minutes).
 pub const RETRY_INTERVAL: Duration = Duration::from_secs(60 * 30);
 
+/// Electronics Remote: the installed service checks our releases every few hours.
+pub const ER_CHECK_INTERVAL: Duration = Duration::from_secs(60 * 60 * 3);
+
+/// Electronics Remote installs updates by itself unless an admin set
+/// `allow-auto-update` to "N" explicitly (upstream defaults to off).
+fn er_auto_update_allowed() -> bool {
+    config::Config::get_option(keys::OPTION_ALLOW_AUTO_UPDATE) != "N"
+}
+
 pub fn update_controlling_session_count(count: usize) {
     CONTROLLING_SESSION_COUNT.store(count, Ordering::SeqCst);
 }
@@ -146,7 +155,7 @@ fn start_auto_update_check_(rx_msg: Receiver<UpdateMsg>) {
     }
 
     let mut last_check_time = Instant::now();
-    let mut check_interval = DUR_ONE_DAY;
+    let mut check_interval = ER_CHECK_INTERVAL;
     loop {
         let recv_res = rx_msg.recv_timeout(check_interval);
         match &recv_res {
@@ -165,7 +174,7 @@ fn start_auto_update_check_(rx_msg: Receiver<UpdateMsg>) {
                     check_interval = RETRY_INTERVAL;
                 } else {
                     last_check_time = Instant::now();
-                    check_interval = DUR_ONE_DAY;
+                    check_interval = ER_CHECK_INTERVAL;
                 }
             }
             Ok(UpdateMsg::Exit) => break,
@@ -182,7 +191,7 @@ fn check_update(manually: bool) -> ResultType<()> {
     }
     #[cfg(target_os = "windows")]
     let update_msi = crate::platform::is_msi_installed()?;
-    if !(manually || config::Config::get_bool_option(keys::OPTION_ALLOW_AUTO_UPDATE)) {
+    if !(manually || er_auto_update_allowed()) {
         return Ok(());
     }
     if do_check_software_update().is_err() {
