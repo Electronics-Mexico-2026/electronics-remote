@@ -433,7 +433,9 @@ class FfiModel with ChangeNotifier {
       } else if (name == 'fingerprint') {
         FingerprintState.find(peerId).value = evt['fingerprint'] ?? '';
       } else if (name == "sync_peer_hash_password_to_personal_ab") {
-        if (desktopType == DesktopType.main || isWeb || isMobile) {
+        // Electronics Remote: la contraseña recordada no se sube al panel.
+        if (kErUseAbPasswords &&
+            (desktopType == DesktopType.main || isWeb || isMobile)) {
           final id = evt['id'];
           final hash = evt['hash'];
           if (id != null && hash != null) {

@@ -18,8 +18,8 @@ Future<void> erPasswordDialog(
   bool rememberInit,
 ) async {
   final askRemember = erOptOn(kErOptAskRemember);
-  var remember =
-      askRemember && (rememberInit || erOptOn(kErOptRememberDefault));
+  // Regla del dueño: apagado de fábrica; la persona decide.
+  var remember = askRemember && rememberInit;
   var alias = '';
   try {
     alias =
@@ -38,7 +38,6 @@ Future<void> erPasswordDialog(
     submit() {
       final password = passwordController.text.trim();
       if (password.isEmpty) return;
-      if (askRemember) erSetOpt(kErOptRememberDefault, remember ? 'Y' : 'N');
       gFFI.login('', '', sessionId, password, remember);
       close();
       dialogManager.showLoading(translate('Logging in...'),

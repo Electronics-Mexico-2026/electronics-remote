@@ -4769,6 +4769,11 @@ pub async fn handle_hash(
 
 #[inline]
 fn try_get_password_from_personal_ab(lc: Arc<RwLock<LoginConfigHandler>>, password: &mut Vec<u8>) {
+    // Electronics Remote: passwords never come from an address book, only from what this
+    // device remembered after the user ticked «Recordar contraseña».
+    if true {
+        return;
+    }
     let access_token = LocalConfig::get_option("access_token");
     let ab = config::Ab::load();
     if !access_token.is_empty() && access_token == ab.access_token {

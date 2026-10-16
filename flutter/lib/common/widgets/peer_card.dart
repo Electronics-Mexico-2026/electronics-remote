@@ -1613,7 +1613,9 @@ void connectInPeerTab(BuildContext context, Peer peer, PeerTabIndex tab,
         alias: peer.alias,
       );
     }
-    if (!gFFI.abModel.current.isPersonal()) {
+    // Electronics Remote: la contraseña nunca sale de la libreta; se escribe
+    // y solo se recuerda en este aparato si la persona lo marca.
+    if (kErUseAbPasswords && !gFFI.abModel.current.isPersonal()) {
       if (peer.password.isNotEmpty) {
         password = peer.password;
         isSharedPassword = true;

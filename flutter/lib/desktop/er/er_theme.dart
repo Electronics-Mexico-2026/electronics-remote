@@ -48,11 +48,39 @@ bool erHasMyAb() {
 
 /// Deja como actual la libreta de la persona (si existe).
 Future<void> erSelectMyAb() async {
-  if (!erHasMyAb()) return;
+  if (!erHasMyAb()) {
+    await erForgetRemovedComputers();
+    return;
+  }
   final n = erMyAbName();
   if (gFFI.abModel.currentName.value != n) {
     await gFFI.abModel.setCurrentName(n);
   }
+  await erForgetRemovedComputers();
+}
+
+const String _kErOptMyAbIds = 'er-my-ab-ids';
+
+/// Si a la persona le quitaron una computadora de su libreta, se olvida la
+/// contraseña recordada en este aparato: al volver a dársela, se la pide.
+Future<void> erForgetRemovedComputers() async {
+  final ab = gFFI.abModel;
+  if (gFFI.userModel.userName.value.isEmpty) return;
+  if (gFFI.userModel.networkError.value.isNotEmpty) return;
+  if (ab.abPullError.value.isNotEmpty || ab.addressbooks.isEmpty) return;
+  final mine = erMyAbName();
+  final book = ab.addressbooks[mine];
+  if (book != null && !book.initialized) return;
+  final now = (book?.peers.map((p) => p.id).toSet() ?? <String>{});
+  final prev = erGetOpt(_kErOptMyAbIds)
+      .split(',')
+      .where((e) => e.isNotEmpty)
+      .toSet();
+  for (final id in prev.difference(now)) {
+    await bind.mainForgetPassword(id: id);
+  }
+  final joined = (now.toList()..sort()).join(',');
+  if (joined != erGetOpt(_kErOptMyAbIds)) await erSetOpt(_kErOptMyAbIds, joined);
 }
 
 /// Pide al panel las libretas y deja la de la persona.
@@ -72,9 +100,6 @@ const String kErOptShowStatusbar = 'er-show-statusbar';
 const String kErOptOnlineOnly = 'er-filter-online';
 const String kErOptHideThumbs = 'er-hide-thumbs';
 const String kErOptAskRemember = 'er-ask-remember-password';
-// Último valor elegido en «Recordar contraseña» (encendido de fábrica): el
-// interruptor ya no arranca apagado en cada equipo nuevo.
-const String kErOptRememberDefault = 'er-remember-password-default';
 const String kErOptSection = 'er-sidebar-section';
 
 String erGetOpt(String key) => bind.mainGetLocalOption(key: key);
