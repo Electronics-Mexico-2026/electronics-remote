@@ -93,6 +93,14 @@ class _RawTouchGestureDetectorRegionState
   double _mouseScrollIntegral = 0; // mouse scroll speed controller
   double _scale = 1;
 
+  // Electronics Remote (Android, modo mouse): dos dedos que se arrastran sin
+  // pellizcar mueven la rueda del mouse, como RealVNC. 0 = sin decidir,
+  // 1 = zoom/paneo, 2 = rueda.
+  int _erTwoMode = 0;
+  Offset _erTwoMove = Offset.zero;
+  double _erWheelAcc = 0;
+  static const double _erWheelStep = 18;
+
   // Workaround tap down event when two fingers are used to scale(mobile)
   TapDownDetails? _lastTapDownDetails;
 
@@ -449,6 +457,9 @@ class _RawTouchGestureDetectorRegionState
   // scale + pan event
   onTwoFingerScaleStart(ScaleStartDetails d) {
     _lastTapDownDetails = null;
+    _erTwoMode = 0;
+    _erTwoMove = Offset.zero;
+    _erWheelAcc = 0;
     if (isNotTouchBasedDevice()) {
       return;
     }
@@ -488,6 +499,30 @@ class _RawTouchGestureDetectorRegionState
       }
     } else {
       // mobile
+      if (isAndroid && !handleTouch && !ffiModel.isPeerMobile) {
+        // Decide una vez por gesto: pellizco = zoom; arrastre vertical con
+        // los dedos a la misma distancia = rueda del mouse.
+        if (_erTwoMode == 0) {
+          _erTwoMove += d.focalPointDelta;
+          if ((d.scale - 1).abs() > 0.06) {
+            _erTwoMode = 1;
+          } else if (_erTwoMove.distance > 14) {
+            _erTwoMode =
+                _erTwoMove.dy.abs() > _erTwoMove.dx.abs() * 1.2 ? 2 : 1;
+          } else {
+            return;
+          }
+        }
+        if (_erTwoMode == 2) {
+          _erWheelAcc += d.focalPointDelta.dy;
+          while (_erWheelAcc.abs() >= _erWheelStep) {
+            final step = _erWheelAcc > 0 ? 1 : -1;
+            await inputModel.scroll(step);
+            _erWheelAcc -= step * _erWheelStep;
+          }
+          return;
+        }
+      }
       ffi.canvasModel.updateScale(d.scale / _scale, d.focalPoint);
       _scale = d.scale;
       ffi.canvasModel.panX(d.focalPointDelta.dx);

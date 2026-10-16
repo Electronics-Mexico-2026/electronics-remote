@@ -121,6 +121,9 @@ class FfiModel with ChangeNotifier {
   Timer? _restartReconnectDelayTimer;
   var _reconnects = 1;
   DateTime? _offlineReconnectStartTime;
+  // Electronics Remote: reintentos solos cuando el celular no alcanzó el
+  // servidor (red móvil, app en segundo plano).
+  int _erNetRetries = 0;
   bool _androidDocumentPickerActive = false;
   bool _androidDocumentPickerInterruptedConnection = false;
   bool _viewOnly = false;
@@ -965,6 +968,9 @@ class FfiModel with ChangeNotifier {
       if (!hasRetry) {
         hasRetry = shouldAutoRetryOnOffline(type, title, text);
       }
+      if (!hasRetry) {
+        hasRetry = erShouldRetryNetwork(type, title, text);
+      }
       showMsgBox(sessionId, type, title, text, link, hasRetry, dialogManager);
     }
   }
@@ -1021,6 +1027,24 @@ class FfiModel with ChangeNotifier {
       }
     }
     return false;
+  }
+
+  /// Electronics Remote (Android): «Failed to connect to <servidor>» es que
+  /// el celular no llegó al servidor (cambio de red, la app volvió de segundo
+  /// plano). RustDesk no reintenta ese error y al cerrar la sesión se pierde
+  /// la contraseña ya escrita, así que se reintenta solo hasta 6 veces
+  /// (1+2+4+8+16+32 s) dentro de la misma sesión.
+  bool erShouldRetryNetwork(String type, String title, String text) {
+    if (!isAndroid) return false;
+    if (type != 'error' || title != 'Connection Error') return false;
+    final t = text.toLowerCase();
+    final net = t.startsWith('failed to connect to') ||
+        t.contains('timed out') ||
+        t.contains('network is unreachable');
+    if (!net) return false;
+    if (_erNetRetries >= 6) return false;
+    _erNetRetries++;
+    return true;
   }
 
   handleToast(Map<String, dynamic> evt, SessionID sessionId, String peerId) {
@@ -1446,6 +1470,7 @@ class FfiModel with ChangeNotifier {
       }
       if (displays.isNotEmpty) {
         _reconnects = 1;
+        _erNetRetries = 0;
         _offlineReconnectStartTime = null;
         resetRestartReconnectState();
         waitForFirstImage.value = true;

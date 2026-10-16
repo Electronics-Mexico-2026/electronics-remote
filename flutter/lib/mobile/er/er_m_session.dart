@@ -23,6 +23,26 @@ import 'er_m_theme.dart';
 
 const String _kErOptToolbarPin = 'er-mobile-toolbar-pin';
 
+// ------------------------------------------------------- valores de inicio
+
+const String _kErOptMouseDefault = 'er-mobile-mouse-default-v1';
+
+/// Como RealVNC: el dedo mueve el cursor como touchpad (modo mouse de
+/// RustDesk). Una sola vez por instalación se regresa a modo mouse por si
+/// quedó en «táctil»; después se respeta lo que el usuario elija.
+void erMobileApplyMouseDefault() {
+  if (erGetOpt(_kErOptMouseDefault) == 'Y') return;
+  bind.mainSetLocalOption(key: kOptionTouchMode, value: 'N');
+  erSetOpt(_kErOptMouseDefault, 'Y');
+}
+
+/// Al abrir la sesión, la pantalla del equipo entra ajustada al celular.
+Future<void> erMobileFitOnOpen(FFI ffi) async {
+  await bind.sessionSetViewStyle(
+      sessionId: ffi.sessionId, value: kRemoteViewStyleAdaptive);
+  await ffi.canvasModel.updateViewStyle();
+}
+
 // --------------------------------------------------------------- conectando
 
 /// Pantalla completa de «Conectando…» (como RealVNC) en lugar del cuadro
@@ -383,6 +403,7 @@ class _ErSessionOverlayState extends State<ErSessionOverlay> {
   double _barDx = 0;
   Timer? _hideTimer;
   double _scrollAcc = 0;
+  bool _kbWasVisible = false;
 
   FFI get _ffi => gFFI;
   InputModel get _input => _ffi.inputModel;
@@ -426,6 +447,17 @@ class _ErSessionOverlayState extends State<ErSessionOverlay> {
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
     final kb = MediaQuery.of(context).viewInsets.bottom > 0;
+    // Como RealVNC: las teclas extra viven con el teclado. Si el teclado del
+    // celular se cierra (atrás, gesto), la fila también se va y el campo
+    // oculto suelta el foco para que el teclado no vuelva a salir solo.
+    if (_kbWasVisible && !kb && _keysOn) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || MediaQuery.of(context).viewInsets.bottom > 0) return;
+        setState(() => _keysOn = false);
+        widget.actions.hideKeyboard();
+      });
+    }
+    _kbWasVisible = kb;
     final keysH = _keysOn ? 48.0 : 0.0;
     return erThemed(Stack(
       children: [
@@ -1053,17 +1085,17 @@ class _ErHowToControlPageState extends State<ErHowToControlPage> {
             (
               Icons.back_hand_outlined,
               'Clic derecho',
-              'Mantén presionado un dedo.'
+              'Toca con dos dedos o mantén presionado un dedo.'
             ),
             (
               Icons.unfold_more_rounded,
-              'Desplazar',
-              'Desliza tres dedos hacia arriba o hacia abajo.'
+              'Desplazar (rueda)',
+              'Desliza dos dedos juntos hacia arriba o hacia abajo.'
             ),
             (
               Icons.open_with_rounded,
               'Mover la vista',
-              'Desliza dos dedos para mover la pantalla ampliada.'
+              'Con zoom, la vista sigue al cursor; también puedes separar un poco los dedos y moverlos.'
             ),
             (
               Icons.drag_indicator_rounded,

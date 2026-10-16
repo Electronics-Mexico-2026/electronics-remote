@@ -97,6 +97,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     gFFI.ffiModel.updateEventListener(sessionId, widget.id);
+    if (isAndroid) erMobileApplyMouseDefault();
     gFFI.start(
       widget.id,
       password: widget.password,
@@ -132,6 +133,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
       }
       _disableAndroidSoftKeyboard(
           isKeyboardVisible: keyboardVisibilityController.isVisible);
+      if (isAndroid) erMobileFitOnOpen(gFFI);
     });
     WidgetsBinding.instance.addObserver(this);
 

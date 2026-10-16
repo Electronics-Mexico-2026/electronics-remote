@@ -620,6 +620,34 @@ jobs:
           name: electronics-remote-windows-x86_64
           path: dist
 
+      # Sin esto el servicio instalado en la VM se registra en NUESTRO servidor y
+      # en el panel (aparecen equipos «runnervm…» después de cada compilación).
+      - name: Aislar la VM del servidor propio (no registrarse en hbbs ni en el panel)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $hosts = @()
+          foreach ($v in @($env:RENDEZVOUS_SERVER, $env:API_SERVER)) {
+            if ([string]::IsNullOrWhiteSpace($v)) { continue }
+            $h = $v -replace '^[a-zA-Z]+://', ''
+            $h = ($h -split '/')[0]
+            if ($h -match '^\[(.+)\]') { $h = $Matches[1] } elseif (($h.Split(':')).Count -eq 2) { $h = $h.Split(':')[0] }
+            if ($h) { $hosts += $h }
+          }
+          $ips = @()
+          foreach ($h in ($hosts | Select-Object -Unique)) {
+            $parsed = $null
+            if ([System.Net.IPAddress]::TryParse($h, [ref]$parsed)) { $ips += $h; continue }
+            try { $ips += [System.Net.Dns]::GetHostAddresses($h) | ForEach-Object { $_.IPAddressToString } } catch { Write-Host "no resuelve $h" }
+            Add-Content -Path "$env:windir\System32\drivers\etc\hosts" -Value "0.0.0.0 $h"
+          }
+          $ips = $ips | Select-Object -Unique
+          if ($ips.Count -gt 0) {
+            New-NetFirewallRule -DisplayName 'ER-CI-bloquear-servidor' -Direction Outbound -Action Block -RemoteAddress $ips | Out-Null
+            New-NetFirewallRule -DisplayName 'ER-CI-bloquear-servidor-in' -Direction Inbound -Action Block -RemoteAddress $ips | Out-Null
+          }
+          Write-Host "bloqueados: hosts=$($hosts -join ',') ips=$($ips -join ',')"
+
       - name: Instalar con --silent-install y verificar (servicio Auto + LocalSystem)
         shell: pwsh
         run: |
