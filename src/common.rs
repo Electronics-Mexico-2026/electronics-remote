@@ -1028,10 +1028,16 @@ pub fn check_software_update() {
 // from api.rustdesk.com or rustdesk/rustdesk.
 pub const ER_REPO: &str = "Electronics-Mexico-2026/electronics-remote";
 pub const ER_TAG_PREFIX: &str = "electronics-remote-";
+/// Public bucket the updater reads first (`latest.json` + `<tag>/<asset>`), so
+/// updates keep working when the GitHub repo is private.
+pub const ER_BUCKET_URL: &str =
+    "https://storage.googleapis.com/electronics-mexico-webhooks-fotos-publicas/electronics-remote";
 
 lazy_static::lazy_static! {
     // "", "checking", "none", "available:<release page url>" or "error:<msg>"
     pub static ref ER_UPDATE_STATE: Arc<Mutex<String>> = Default::default();
+    // asset name -> sha256 from the bucket's latest.json (empty with GitHub).
+    pub static ref ER_UPDATE_SHA256: Arc<Mutex<HashMap<String, String>>> = Default::default();
 }
 
 /// Stable release asset names the updater downloads.
@@ -1091,8 +1097,112 @@ pub fn er_check_update_now() {
     });
 }
 
+/// Reads `latest.json` from the bucket: (tag, asset name -> (url, sha256)).
+async fn er_bucket_latest() -> hbb_common::ResultType<(String, HashMap<String, (String, String)>)> {
+    let url = format!("{ER_BUCKET_URL}/latest.json");
+    let proxy_conf = Config::get_socks();
+    let tls_url = get_url_for_tls(&url, &proxy_conf);
+    let tls_type = get_cached_tls_type(tls_url).unwrap_or(TlsType::Rustls);
+    let client = create_http_client_async(tls_type, false);
+    let resp = client
+        .get(&url)
+        .header("User-Agent", "ElectronicsRemote")
+        .header("Cache-Control", "no-cache")
+        .timeout(std::time::Duration::from_secs(15))
+        .send()
+        .await?;
+    if !resp.status().is_success() {
+        hbb_common::bail!("bucket latest.json: {}", resp.status());
+    }
+    let bytes = resp.bytes().await?;
+    er_parse_bucket_latest(&bytes)
+}
+
+fn er_parse_bucket_latest(
+    bytes: &[u8],
+) -> hbb_common::ResultType<(String, HashMap<String, (String, String)>)> {
+    let v: serde_json::Value = serde_json::from_slice(bytes)?;
+    let tag = v["tag"].as_str().unwrap_or_default().to_owned();
+    if !tag.starts_with(ER_TAG_PREFIX) {
+        hbb_common::bail!("bucket latest.json without a valid tag");
+    }
+    let prefix = format!("{ER_BUCKET_URL}/{tag}/");
+    let mut files = HashMap::new();
+    if let Some(map) = v["files"].as_object() {
+        for (name, f) in map {
+            let url = f["url"].as_str().unwrap_or_default();
+            let sha = f["sha256"].as_str().unwrap_or_default().to_ascii_lowercase();
+            // The download path only accepts <bucket>/<tag>/<asset>.
+            if url != format!("{prefix}{name}") || sha.len() != 64 {
+                hbb_common::bail!("bucket latest.json: unexpected entry for {name}");
+            }
+            files.insert(name.clone(), (url.to_owned(), sha));
+        }
+    }
+    Ok((tag, files))
+}
+
+/// False only when the bucket listed a sha256 for this file and it differs.
+pub fn er_update_file_sha256_ok(path: &std::path::Path) -> bool {
+    use sha2::{Digest, Sha256};
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    let Some(expected) = ER_UPDATE_SHA256.lock().unwrap().get(name).cloned() else {
+        return true;
+    };
+    let mut hasher = Sha256::new();
+    match std::fs::File::open(path).and_then(|mut f| std::io::copy(&mut f, &mut hasher)) {
+        Ok(_) => {
+            let got = hex::encode(hasher.finalize());
+            if got != expected {
+                log::error!("sha256 mismatch for {name}: {got} != {expected}");
+            }
+            got == expected
+        }
+        Err(e) => {
+            log::error!("Failed to hash {name}: {e}");
+            false
+        }
+    }
+}
+
+fn er_publish_update_url(response_url: String) {
+    #[cfg(feature = "flutter")]
+    {
+        let mut m = HashMap::new();
+        m.insert("name", "check_software_update_finish");
+        m.insert("url", &response_url);
+        if let Ok(data) = serde_json::to_string(&m) {
+            let _ = crate::flutter::push_global_event(crate::flutter::APP_TYPE_MAIN, data);
+        }
+    }
+    *SOFTWARE_UPDATE_URL.lock().unwrap() = response_url;
+}
+
 #[tokio::main(flavor = "current_thread")]
 pub async fn do_check_software_update() -> hbb_common::ResultType<()> {
+    match er_bucket_latest().await {
+        Ok((tag, files)) => {
+            let latest = tag.strip_prefix(ER_TAG_PREFIX).unwrap_or_default();
+            let is_valid_tag = !latest.is_empty()
+                && latest
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-');
+            *ER_UPDATE_SHA256.lock().unwrap() =
+                files.into_iter().map(|(k, (_, sha))| (k, sha)).collect();
+            if is_valid_tag && er_version_key(latest) > er_version_key(er_version()) {
+                er_publish_update_url(format!("{ER_BUCKET_URL}/{tag}"));
+            } else {
+                *SOFTWARE_UPDATE_URL.lock().unwrap() = "".to_string();
+            }
+            return Ok(());
+        }
+        Err(e) => {
+            log::warn!("Update bucket failed, falling back to GitHub: {e}");
+            ER_UPDATE_SHA256.lock().unwrap().clear();
+        }
+    }
     let url = format!("https://api.github.com/repos/{ER_REPO}/releases/latest");
     let proxy_conf = Config::get_socks();
     let tls_url = get_url_for_tls(&url, &proxy_conf);
@@ -3634,6 +3744,21 @@ mod tests {
         assert!(er_version_key("1.5.0-er.19") == er_version_key("1.5.0-er.19"));
         assert!(er_version_key("1.5.1-er.1") > er_version_key("1.5.0-er.99"));
         assert!(er_version_key("1.5.0-er.x") < er_version_key("1.5.0-er.1"));
+    }
+
+    #[test]
+    fn test_er_parse_bucket_latest() {
+        let sha = "a".repeat(64);
+        let tag = "electronics-remote-1.5.0-er.27";
+        let ok = format!(
+            r#"{{"tag":"{tag}","version":"1.5.0-er.27","files":{{"ElectronicsRemote.apk":{{"url":"{ER_BUCKET_URL}/{tag}/ElectronicsRemote.apk","sha256":"{sha}"}}}}}}"#
+        );
+        let (t, files) = er_parse_bucket_latest(ok.as_bytes()).unwrap();
+        assert_eq!(t, tag);
+        assert_eq!(files["ElectronicsRemote.apk"].1, sha);
+        let foreign = ok.replace(ER_BUCKET_URL, "https://example.com/x");
+        assert!(er_parse_bucket_latest(foreign.as_bytes()).is_err());
+        assert!(er_parse_bucket_latest(br#"{"tag":"otro"}"#).is_err());
     }
 
     #[tokio::test]

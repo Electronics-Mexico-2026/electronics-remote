@@ -2724,6 +2724,10 @@ pub fn main_get_common(key: String) -> String {
         } else if key == "er-version" {
             crate::common::er_version().to_owned()
         } else if key == "er-apk-url" {
+            let update_url = crate::common::SOFTWARE_UPDATE_URL.lock().unwrap().clone();
+            if update_url.starts_with(crate::common::ER_BUCKET_URL) {
+                return format!("{}/{}", update_url, crate::common::ER_APK_ASSET);
+            }
             format!(
                 "https://github.com/{}/releases/latest/download/{}",
                 crate::common::ER_REPO,
@@ -2832,6 +2836,10 @@ pub fn main_set_common(_key: String, _value: String) {
             );
         } else if _key == "update-me" {
             if let Some(new_version_file) = get_download_file_from_url(&_value) {
+                if !crate::common::er_update_file_sha256_ok(&new_version_file) {
+                    fs::remove_file(&new_version_file).ok();
+                    return;
+                }
                 log::debug!(
                     "New version file is downloaded, update begin, {:?}",
                     new_version_file.to_str()

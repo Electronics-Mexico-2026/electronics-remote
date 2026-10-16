@@ -1,5 +1,6 @@
-// Electronics Remote: actualizaciones desde los releases propios en GitHub
-// (Electronics-Mexico-2026/electronics-remote), nunca desde rustdesk/rustdesk.
+// Electronics Remote: actualizaciones desde el bucket público propio
+// (latest.json + <tag>/<archivo>); respaldo: releases de GitHub del fork.
+// Nunca desde rustdesk/rustdesk.
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -9,8 +10,9 @@ import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/state_model.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-const kErReleasesUrl =
-    'https://github.com/Electronics-Mexico-2026/electronics-remote/releases/latest';
+const kErBucketUrl =
+    'https://storage.googleapis.com/electronics-mexico-webhooks-fotos-publicas/electronics-remote';
+const kErReleasesUrl = '$kErBucketUrl/latest.json';
 
 bool _erChecking = false;
 
@@ -86,7 +88,7 @@ const _kErLastAutoCheck = 'er-update-last-auto-check';
 const Duration kErAutoCheckEvery = Duration(hours: 3);
 
 /// Android: al abrir y al volver a la app (máximo una vez cada 3 h) revisa
-/// releases/latest; si hay una versión más nueva la descarga sola y abre el
+/// latest.json del bucket (o releases/latest); si hay una versión más nueva la descarga sola y abre el
 /// instalador del sistema. Android exige que la persona toque «Instalar».
 Future<void> erAutoUpdateAndroid() async {
   if (!isAndroid || _erChecking) return;

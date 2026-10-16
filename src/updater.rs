@@ -203,7 +203,7 @@ fn check_update(manually: bool) -> ResultType<()> {
     if update_url.is_empty() {
         log::debug!("No update available.");
     } else {
-        let download_url = update_url.replace("tag", "download");
+        let download_url = update_url.replace("/releases/tag/", "/releases/download/");
         let version = download_url.split('/').last().unwrap_or_default();
         #[cfg(target_os = "windows")]
         let download_url = if cfg!(feature = "flutter") {
@@ -261,6 +261,10 @@ fn check_update(manually: bool) -> ResultType<()> {
             let file_data = response.bytes()?;
             let mut file = std::fs::File::create(&file_path)?;
             file.write_all(&file_data)?;
+        }
+        if !crate::common::er_update_file_sha256_ok(&file_path) {
+            std::fs::remove_file(&file_path).ok();
+            bail!("sha256 mismatch: {}", download_url);
         }
         // We have checked if the `conns` is empty before, but we need to check again.
         // No need to care about the downloaded file here, because it's rare case that the `conns` are empty
@@ -361,7 +365,26 @@ fn update_new_version(update_msi: bool, version: &str, file_path: &PathBuf) {
     }
 }
 
+/// `<ER_BUCKET_URL>/<tag>/<asset>` -> temp file for `<asset>`.
+fn er_bucket_download_file_from_url(url: &str) -> Option<PathBuf> {
+    let rest = url.strip_prefix(crate::common::ER_BUCKET_URL)?.strip_prefix('/')?;
+    let (tag, filename) = rest.split_once('/')?;
+    if !tag.starts_with(crate::common::ER_TAG_PREFIX)
+        || !tag
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
+        || !is_plain_update_filename(filename)
+        || filename.contains(['?', '#', '%'])
+    {
+        return None;
+    }
+    Some(std::env::temp_dir().join(filename))
+}
+
 pub fn get_update_download_file_from_url(url: &str) -> Option<PathBuf> {
+    if let Some(file) = er_bucket_download_file_from_url(url) {
+        return Some(file);
+    }
     let parsed = url::Url::parse(url).ok()?;
     // Check the raw prefix before Url normalizes default ports.
     if !url.starts_with("https://github.com/")
@@ -680,6 +703,18 @@ mod tests {
     }
 
     #[test]
+    fn update_download_file_accepts_bucket_asset_urls() {
+        let file = get_download_file_from_url(
+            "https://storage.googleapis.com/electronics-mexico-webhooks-fotos-publicas/electronics-remote/electronics-remote-1.5.0-er.27/ElectronicsRemote-x64.exe",
+        )
+        .expect("valid bucket asset URL");
+        assert_eq!(
+            file.file_name().and_then(|name| name.to_str()),
+            Some("ElectronicsRemote-x64.exe")
+        );
+    }
+
+    #[test]
     fn update_download_file_rejects_untrusted_or_malformed_urls() {
         for url in [
             "http://github.com/rustdesk/rustdesk/releases/download/1/rustdesk.exe",
@@ -693,6 +728,10 @@ mod tests {
             "https://github.com/rustdesk/rustdesk/releases/download/1/rustdesk.exe?download=1",
             "https://github.com/rustdesk/rustdesk/releases/download/1/rustdesk.exe#download",
             "not a url",
+            "https://storage.googleapis.com/electronics-mexico-webhooks-fotos-publicas/electronics-remote/otro/ElectronicsRemote-x64.exe",
+            "https://storage.googleapis.com/electronics-mexico-webhooks-fotos-publicas/electronics-remote/electronics-remote-1.5.0-er.27/a/b.exe",
+            "https://storage.googleapis.com/electronics-mexico-webhooks-fotos-publicas/electronics-remote/electronics-remote-1.5.0-er.27/x.exe?a=1",
+            "https://storage.googleapis.com/otro-bucket/electronics-remote/electronics-remote-1.5.0-er.27/x.exe",
         ] {
             assert!(get_download_file_from_url(url).is_none(), "{url}");
         }

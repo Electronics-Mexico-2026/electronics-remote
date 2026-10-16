@@ -13,6 +13,13 @@ void main() {
             'https://github.com/Electronics-Mexico-2026/electronics-remote/releases/tag/electronics-remote-1.5.0-er.21',
             '1.5.0-er.20'),
         isTrue);
+    expect(
+        erIsNewer(
+            '$kErBucketUrl/electronics-remote-1.5.0-er.27',
+            '1.5.0-er.26'),
+        isTrue);
+    expect(erIsNewer('$kErBucketUrl/electronics-remote-1.5.0-er.26', '1.5.0-er.26'),
+        isFalse);
     expect(erIsNewer('electronics-remote-1.5.0-er.20', '1.5.0-er.20'), isFalse);
     expect(erIsNewer('basura', '1.5.0-er.3'), isFalse);
   });

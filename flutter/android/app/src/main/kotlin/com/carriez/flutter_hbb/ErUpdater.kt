@@ -1,6 +1,6 @@
 package com.carriez.flutter_hbb
 
-// Electronics Remote: descarga la APK del release propio con DownloadManager y
+// Electronics Remote: descarga la APK del bucket propio (o del release) con DownloadManager y
 // abre el instalador del sistema. DownloadManager entrega un content:// propio,
 // asi que no hace falta FileProvider.
 
@@ -20,7 +20,8 @@ object ErUpdater {
     private var receiver: BroadcastReceiver? = null
 
     fun downloadAndInstall(activity: Activity, url: String): Boolean {
-        if (!url.startsWith("https://github.com/Electronics-Mexico-2026/electronics-remote/releases/")) {
+        if (!url.startsWith("https://github.com/Electronics-Mexico-2026/electronics-remote/releases/") &&
+            !url.startsWith("https://storage.googleapis.com/electronics-mexico-webhooks-fotos-publicas/electronics-remote/")) {
             Log.e(TAG, "URL no permitida: $url")
             return false
         }
