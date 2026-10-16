@@ -49,7 +49,8 @@ env:
   VERSION: "1.5.0"
   NDK_VERSION: "r28c"
   # Version propia: la compila el cliente (option_env! ER_VERSION) y la lleva el
-  # tag del release; el actualizador compara contra releases/latest de este repo.
+  # tag del release; el actualizador compara contra latest.json del bucket
+  # publico (publicar_bucket.py) y, de respaldo, contra releases/latest.
   ER_VERSION: "1.5.0-er.${{ github.run_number }}"
   RELEASE_TAG: "electronics-remote-1.5.0-er.${{ github.run_number }}"
   # Marca (las lee branding/apply.sh)
@@ -740,11 +741,12 @@ jobs:
           name: logs-silent-install-${{ matrix.prueba }}
           path: test-logs
 
-  # Instala la version publicada (releases/latest) y la actualiza con el .exe
+  # Instala la version publicada (latest.json del bucket; respaldo releases/latest)
+  # y la actualiza con el .exe
   # nuevo por el mismo camino que usa el servicio (--update). Informativa: no
   # frena el release.
   test-update:
-    name: prueba actualizacion desde releases/latest
+    name: prueba actualizacion desde la publicada (bucket)
     needs: [build-windows-x64]
     runs-on: windows-latest
     timeout-minutes: 25
@@ -781,8 +783,21 @@ jobs:
         run: |
           $ErrorActionPreference = 'Continue'
           $app = 'ElectronicsRemote'
-          gh release download --repo $env:GITHUB_REPOSITORY --pattern "$app-x64.exe" -D old
-          if (-not (Test-Path "old/$app-x64.exe")) { Write-Host "::warning::no hay release publicado para probar"; exit 0 }
+          # Igual que el actualizador: primero el bucket publico (con sha256), luego GitHub.
+          New-Item -ItemType Directory -Force -Path old | Out-Null
+          try {
+            $latest = Invoke-RestMethod -Headers @{ 'Cache-Control' = 'no-cache' } 'https://storage.googleapis.com/electronics-mexico-webhooks-fotos-publicas/electronics-remote/latest.json'
+            $f = $latest.files."$app-x64.exe"
+            Invoke-WebRequest -UseBasicParsing -Uri $f.url -OutFile "old/$app-x64.exe"
+            $h = (Get-FileHash "old/$app-x64.exe" -Algorithm SHA256).Hash.ToLower()
+            if ($h -ne $f.sha256) { Write-Host "::error::sha256 del bucket no coincide ($h != $($f.sha256))"; exit 1 }
+            Write-Host "base desde el bucket: $($latest.tag)"
+          } catch {
+            Write-Host "::warning::bucket no disponible ($_); se usa releases/latest"
+            Remove-Item -Force "old/$app-x64.exe" -ErrorAction SilentlyContinue
+            gh release download --repo $env:GITHUB_REPOSITORY --pattern "$app-x64.exe" -D old
+          }
+          if (-not (Test-Path "old/$app-x64.exe")) { Write-Host "::warning::no hay version publicada para probar"; exit 0 }
           # El empaquetador se queda vivo tras instalar: no esperar a que salga.
           $null = (Start-Process -FilePath (Resolve-Path "old/$app-x64.exe") -ArgumentList '--silent-install' -PassThru).WaitForExit(180000)
           $exe = Join-Path (Join-Path $env:ProgramFiles $app) "$app.exe"
@@ -830,7 +845,7 @@ jobs:
           APK_RESULT: ${{ needs.build-android-apk.result }}
         run: |
           ls -la dist
-          # El actualizador de la app baja estos nombres exactos de releases/latest.
+          # El actualizador de la app baja estos nombres exactos (bucket y releases).
           for f in ElectronicsRemote.apk ElectronicsRemote-x64.exe ElectronicsRemote-x64.msi                    ElectronicsRemoteEquipo-x64.exe ElectronicsRemoteEquipo-x64.msi; do
             [ -s "dist/$f" ] || { echo "::error::falta $f (el actualizador no lo encontraria)"; exit 1; }
           done
@@ -840,7 +855,7 @@ jobs:
             NOTE="PRUEBA DE COMPILACION (placeholder): servidor pendiente.invalid y llave original de RustDesk. NO instalar en produccion."
           else
             FLAG=--latest
-            NOTE="Servidor: ${RENDEZVOUS_SERVER} | API: ${API_SERVER:-http://<servidor>:21114}"
+            NOTE="Version para produccion (servidor propio configurado en la compilacion)."
           fi
           {
             echo "Electronics Remote ${ER_VERSION} (basado en RustDesk ${VERSION}, AGPL-3.0, uso interno)."
@@ -851,7 +866,7 @@ jobs:
             echo "- Corrida: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
             echo "- Windows x64: ${WIN_RESULT} | Android universal: ${APK_RESULT}"
             echo "- Version: ${ER_VERSION}"
-            echo "- Actualizador: busca ElectronicsRemote-x64.exe / ElectronicsRemote-x64.msi / ElectronicsRemote.apk en releases/latest de este repo."
+            echo "- Actualizador: lee latest.json del bucket publico (publicar con publicar_bucket.py); respaldo: releases/latest."
             echo "- ElectronicsRemoteEquipo-x64.exe (.msi): Electronics Remote Equipo, SOLO RECIBIR, para las PCs que solo se controlan (servicio ElectronicsRemoteEquipo, arranque automatico)."
           } > notes.md
           gh release delete "$RELEASE_TAG" --yes --cleanup-tag || true

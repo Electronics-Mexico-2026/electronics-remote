@@ -8,6 +8,25 @@
   <b>We need your help to translate this README, <a href="https://github.com/rustdesk/rustdesk/tree/master/src/lang">RustDesk UI</a> and <a href="https://github.com/rustdesk/doc.rustdesk.com">RustDesk Doc</a> to your native language</b>
 </p>
 
+## Electronics Remote: publicar una versión (bucket público)
+
+El actualizador de la app (Windows y Android) lee primero
+`https://storage.googleapis.com/electronics-mexico-webhooks-fotos-publicas/electronics-remote/latest.json`
+y baja los instaladores de `electronics-remote/<tag>/<archivo>`, verificando el sha256
+(en Windows). Si el bucket falla, cae a `releases/latest` de GitHub (solo sirve mientras el
+repo sea público). Por eso, después de que el workflow `electronics-remote.yml` publique un
+release, hay que subirlo al bucket:
+
+```
+python publicar_bucket.py                      # el release Latest
+python publicar_bucket.py electronics-remote-1.5.0-er.NN
+python publicar_bucket.py <tag> --solo-verificar
+```
+
+Requiere `gh` y `gcloud` autenticados (el CI no lleva credenciales de GCP). El script baja los
+6 archivos del release, los sube, escribe `latest.json` (`Cache-Control: no-cache`) y comprueba
+por HTTP el tag y el sha256 de cada archivo. Sin este paso las apps NO ven la versión nueva.
+
 > [!Caution]
 > **Misuse Disclaimer:** <br>
 > The developers of RustDesk do not condone or support any unethical or illegal use of this software. Misuse, such as unauthorized access, control or invasion of privacy, is strictly against our guidelines. The authors are not responsible for any misuse of the application.
