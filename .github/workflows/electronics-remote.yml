@@ -607,12 +607,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # completo; «Equipo» (solo recibir); y los dos en la misma PC (no deben chocar)
-          - { prueba: completo, apps: "ElectronicsRemote" }
-          - { prueba: equipo, apps: "ElectronicsRemoteEquipo" }
-          - { prueba: ambos, apps: "ElectronicsRemote ElectronicsRemoteEquipo" }
+          # completo; «Equipo» (solo recibir); y con el completo ya puesto, «Equipo»
+          # debe NEGARSE a instalarse (mismo ID con otra llave = conexiones fallan)
+          - { prueba: completo, apps: "ElectronicsRemote", negado: "" }
+          - { prueba: equipo, apps: "ElectronicsRemoteEquipo", negado: "" }
+          - { prueba: ambos, apps: "ElectronicsRemote", negado: "ElectronicsRemoteEquipo" }
     env:
       APPS: ${{ matrix.apps }}
+      NEGADO: ${{ matrix.negado }}
     steps:
       - name: Download Windows build
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -703,6 +705,15 @@ jobs:
             exit 1
           }
           Write-Host "OK: $($env:APPS) instalados, servicio corriendo, StartMode Auto, LocalSystem"
+          if ($env:NEGADO) {
+            $n = $env:NEGADO
+            Write-Host "===== $n --silent-install (debe negarse: ya esta $($env:APPS))"
+            $p = Start-Process -FilePath (Resolve-Path "dist/$n-x64.exe") -ArgumentList '--silent-install' -PassThru
+            $null = $p.WaitForExit(120000)
+            Start-Sleep -Seconds 30
+            if (Get-Service -Name $n -ErrorAction SilentlyContinue) { Write-Host "::error::$n se instalo junto a $($env:APPS)"; exit 1 }
+            Write-Host "OK: $n se nego a instalarse junto a $($env:APPS)"
+          }
 
       - name: Captura de la ventana principal
         if: always()

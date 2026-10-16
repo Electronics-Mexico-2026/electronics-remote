@@ -1583,6 +1583,14 @@ fn get_after_install(
 }
 
 pub fn install_me(options: &str, path: String, silent: bool, debug: bool) -> ResultType<()> {
+    if let Some(other) = er_other_flavor_installed() {
+        if !silent {
+            message_box(&format!(
+                "Esta computadora ya tiene «{other}». Desinstálalo primero: los dos juntos usan el mismo ID con distinta llave y las conexiones fallan!"
+            ));
+        }
+        bail!("{} is already installed on this machine", other);
+    }
     // MSI and EXE installations use different registry layouts, so MSI-to-EXE upgrades are not supported.
     let (installed_subkey, _, _, _) = get_install_info();
     if get_windows_installer_state(&installed_subkey)? == Some(true) {
@@ -4952,4 +4960,18 @@ ProcessId=10136
         );
         assert_eq!(pids.len(), 0);
     }
+}
+
+// Electronics Remote: the full app and «Equipo» take the same machine ID, each with its own key,
+// so with both installed hbbs keeps swapping keys and connections land on either one at random.
+fn er_other_flavor_installed() -> Option<&'static str> {
+    let other = match crate::get_app_name().as_str() {
+        "ElectronicsRemote" => "ElectronicsRemoteEquipo",
+        "ElectronicsRemoteEquipo" => "ElectronicsRemote",
+        _ => return None,
+    };
+    RegKey::predef(HKEY_LOCAL_MACHINE)
+        .open_subkey(format!("SYSTEM\\CurrentControlSet\\Services\\{}", other))
+        .ok()
+        .map(|_| other)
 }
