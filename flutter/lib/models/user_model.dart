@@ -131,6 +131,9 @@ class UserModel {
     if (userInfo != null) {
       userName.value = (userInfo['name'] ?? '').toString();
       displayName.value = (userInfo['display_name'] ?? '').toString();
+      if (displayName.value.trim().isEmpty) {
+        displayName.value = _erCachedNickname(userName.value);
+      }
       avatar.value = (userInfo['avatar'] ?? '').toString();
     }
   }
@@ -149,13 +152,48 @@ class UserModel {
 
   _parseAndUpdateUser(UserPayload user) {
     userName.value = user.name;
-    displayName.value = user.displayName;
+    displayName.value = user.displayName.trim().isNotEmpty
+        ? user.displayName
+        : _erCachedNickname(user.name);
     avatar.value = user.avatar;
     isAdmin.value = user.isAdmin;
     bind.mainSetLocalOption(key: 'user_info', value: jsonEncode(user));
     if (isWeb) {
       // ugly here, tmp solution
       bind.mainSetLocalOption(key: 'verifier', value: user.verifier ?? '');
+    }
+    if (user.displayName.trim().isEmpty) _erFetchNickname(user.name);
+  }
+
+  // Electronics Remote: el panel (lejianwen/rustdesk-api) no manda el nombre
+  // en /api/currentUser; el «nickname» (el nombre como está en el sitio)
+  // sale de /api/admin/user/current con el mismo token.
+  static const _kErNickname = 'er-panel-nickname';
+
+  String _erCachedNickname(String name) {
+    final v = bind.mainGetLocalOption(key: _kErNickname);
+    final i = v.indexOf('|');
+    if (i <= 0 || v.substring(0, i) != name) return '';
+    return v.substring(i + 1);
+  }
+
+  Future<void> _erFetchNickname(String name) async {
+    try {
+      final token = bind.mainGetLocalOption(key: 'access_token');
+      if (token.isEmpty || name.isEmpty) return;
+      final url = await bind.mainGetApiServer();
+      final resp = await http.get(Uri.parse('$url/api/admin/user/current'),
+          headers: {'api-token': token});
+      if (resp.statusCode != 200) return;
+      final data = json.decode(decode_http_response(resp));
+      if (data is! Map || data['code'] != 0 || data['data'] is! Map) return;
+      final nick = (data['data']['nickname'] ?? '').toString().trim();
+      if (userName.value != name) return;
+      displayName.value = nick;
+      await bind.mainSetLocalOption(
+          key: _kErNickname, value: nick.isEmpty ? '' : '$name|$nick');
+    } catch (e) {
+      debugPrint('ER nickname: $e');
     }
   }
 
