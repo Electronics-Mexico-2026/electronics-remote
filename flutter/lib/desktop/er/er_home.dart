@@ -21,7 +21,6 @@ import '../../common/widgets/peer_card.dart';
 import '../../common/widgets/peer_tab_page.dart';
 import '../../common/widgets/peers_view.dart';
 import '../../consts.dart';
-import '../../models/ab_model.dart';
 import '../../models/peer_model.dart';
 import '../../models/peer_tab_model.dart';
 import '../../models/platform_model.dart';
@@ -47,7 +46,6 @@ class ErHome extends StatefulWidget {
 
 class _ErHomeState extends State<ErHome> with WindowListener {
   final _search = TextEditingController();
-  final _teamExpanded = true.obs;
   final _thisDeviceExpanded = true.obs;
   final _sessions = 0.obs;
   final _deviceCount = 0.obs;
@@ -62,6 +60,10 @@ class _ErHomeState extends State<ErHome> with WindowListener {
     _thisDeviceExpanded.value = erGetOpt('er-this-device') != 'N';
     _timer = Timer.periodic(const Duration(seconds: 2), (_) => _onTick());
     windowManager.addListener(this);
+    // Al abrir, la lista principal es «Mis computadoras».
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _selectSection(PeerTabIndex.ab);
+    });
   }
 
   // Lo mismo que hacía ConnectionPage (la vista que esta reemplaza) con la
@@ -192,8 +194,7 @@ class _ErHomeState extends State<ErHome> with WindowListener {
         bind.mainLoadLanPeers();
         break;
       case PeerTabIndex.ab:
-        gFFI.abModel.pullAb(
-            force: force ? ForcePullAb.listAndCurrent : null, quiet: false);
+        erPullMyAb(force: force, quiet: false);
         break;
       case PeerTabIndex.group:
         gFFI.groupModel.pull(force: force);
@@ -629,12 +630,7 @@ class _ErHomeState extends State<ErHome> with WindowListener {
               value: gFFI.peerTabModel,
               child: Consumer<PeerTabModel>(
                 builder: (context, model, _) => Obx(() {
-                  final group = gFFI.groupModel;
                   final cur = PeerTabIndex.values[model.currentTab];
-                  final selName = group.selectedAccessibleItemName.value;
-                  final isDevGroup = group.isSelectedDeviceGroup.value;
-                  final devGroups = group.deviceGroups.toList();
-                  final users = group.users.toList();
                   return ListView(
                     padding: const EdgeInsets.symmetric(vertical: 6),
                     children: [
@@ -656,7 +652,7 @@ class _ErHomeState extends State<ErHome> with WindowListener {
                         _navItem(
                             context,
                             Icons.grid_view_rounded,
-                            'Direcciones',
+                            kErMyComputers,
                             cur == PeerTabIndex.ab,
                             () => _selectSection(PeerTabIndex.ab)),
                       if (model.isEnabled[PeerTabIndex.lan.index])
@@ -666,33 +662,6 @@ class _ErHomeState extends State<ErHome> with WindowListener {
                             'Red local',
                             cur == PeerTabIndex.lan,
                             () => _selectSection(PeerTabIndex.lan)),
-                      if (model.isEnabled[PeerTabIndex.group.index]) ...[
-                        _teamHeader(context,
-                            cur == PeerTabIndex.group && selName.isEmpty),
-                        if (_teamExpanded.value) ...[
-                          for (final g in devGroups)
-                            _navItem(
-                                context,
-                                Icons.desktop_windows_outlined,
-                                g.name,
-                                cur == PeerTabIndex.group &&
-                                    isDevGroup &&
-                                    selName == g.name,
-                                () => _selectGroupItem(g.name, true),
-                                indent: 22),
-                          if (devGroups.isEmpty)
-                            for (final u in users)
-                              _navItem(
-                                  context,
-                                  Icons.person_outline_rounded,
-                                  u.displayNameOrName,
-                                  cur == PeerTabIndex.group &&
-                                      !isDevGroup &&
-                                      selName == u.name,
-                                  () => _selectGroupItem(u.name, false),
-                                  indent: 22),
-                        ],
-                      ],
                     ],
                   );
                 }),
@@ -703,33 +672,6 @@ class _ErHomeState extends State<ErHome> with WindowListener {
           _thisDevicePanel(context),
         ],
       ),
-    );
-  }
-
-  void _selectGroupItem(String name, bool isDeviceGroup) {
-    final group = gFFI.groupModel;
-    group.isSelectedDeviceGroup.value = isDeviceGroup;
-    group.selectedAccessibleItemName.value = name;
-    _selectSection(PeerTabIndex.group, keepGroup: true);
-  }
-
-  Widget _teamHeader(BuildContext context, bool selected) {
-    return _navItem(
-      context,
-      Icons.groups_2_outlined,
-      'Electronics',
-      selected,
-      () => _selectSection(PeerTabIndex.group),
-      leading: InkWell(
-        onTap: () => _teamExpanded.value = !_teamExpanded.value,
-        child: Icon(
-          _teamExpanded.value
-              ? Icons.arrow_drop_down_rounded
-              : Icons.arrow_right_rounded,
-          size: 20,
-        ),
-      ),
-      bold: true,
     );
   }
 
@@ -831,6 +773,7 @@ class _ErHomeState extends State<ErHome> with WindowListener {
               child: PeerTabPage(
                 erMode: true,
                 erGroupView: const ErGroupView(),
+                erAbView: const ErMyAbView(),
               ),
             ),
           ),
@@ -876,6 +819,80 @@ class _ErHomeState extends State<ErHome> with WindowListener {
         ],
       ),
     );
+  }
+}
+
+/// «Mis computadoras»: solo la libreta «Equipos de <usuario>» que el sitio
+/// le comparte a la persona; sin ella, un aviso y nada más.
+class ErMyAbView extends StatelessWidget {
+  const ErMyAbView({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return Obx(() {
+      final user = gFFI.userModel;
+      final ab = gFFI.abModel;
+      if (!user.isLogin) {
+        return Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('Inicia sesión con tu cuenta del panel para ver los equipos',
+                  style: erTextStyle(context)),
+              const SizedBox(height: 12),
+              ElevatedButton(
+                  onPressed: loginDialog,
+                  child: Text('Iniciar sesión', style: erTextStyle(context))),
+            ],
+          ),
+        );
+      } else if (user.networkError.isNotEmpty) {
+        return netWorkErrorWidget();
+      }
+      final has = erHasMyAb();
+      if (has && ab.currentName.value != erMyAbName()) {
+        Future.microtask(erSelectMyAb);
+        return const Center(child: CircularProgressIndicator());
+      }
+      if (!has || (ab.currentAbEmpty && !ab.currentAbLoading.value)) {
+        if (!has &&
+            (ab.currentAbLoading.value ||
+                (ab.addressbooks.isEmpty && ab.abPullError.isEmpty))) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        return Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(kErNoComputers,
+                  textAlign: TextAlign.center, style: erTextStyle(context)),
+              const SizedBox(height: 12),
+              ElevatedButton.icon(
+                  onPressed: () => erPullMyAb(quiet: false),
+                  icon: const Icon(Icons.refresh_rounded, size: 18),
+                  label: Text('Actualizar', style: erTextStyle(context))),
+            ],
+          ),
+        );
+      }
+      return Column(
+        children: [
+          if (ab.currentAbLoading.value && ab.currentAbEmpty)
+            const LinearProgressIndicator(),
+          buildErrorBanner(context,
+              loading: ab.currentAbLoading,
+              err: ab.abPullError,
+              retry: null,
+              close: ab.clearPullErrors),
+          Expanded(
+            child: Align(
+              alignment: Alignment.topLeft,
+              child: AddressBookPeersView(menuPadding: kDesktopMenuPadding),
+            ),
+          ),
+        ],
+      );
+    });
   }
 }
 

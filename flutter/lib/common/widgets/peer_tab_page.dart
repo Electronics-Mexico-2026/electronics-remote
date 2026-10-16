@@ -30,7 +30,9 @@ class PeerTabPage extends StatefulWidget {
   /// cuadrícula (sin la fila de pestañas).
   final bool erMode;
   final Widget? erGroupView;
-  const PeerTabPage({Key? key, this.erMode = false, this.erGroupView})
+  final Widget? erAbView;
+  const PeerTabPage(
+      {Key? key, this.erMode = false, this.erGroupView, this.erAbView})
       : super(key: key);
   @override
   State<PeerTabPage> createState() => _PeerTabPageState();
@@ -214,6 +216,10 @@ class _PeerTabPageState extends State<PeerTabPage>
           widget.erGroupView != null &&
           model.currentTab == PeerTabIndex.group.index) {
         child = widget.erGroupView!;
+      } else if (widget.erMode &&
+          widget.erAbView != null &&
+          model.currentTab == PeerTabIndex.ab.index) {
+        child = widget.erAbView!;
       } else if (model.visibleEnabledOrderedIndexs
               .contains(model.currentTab) ||
           (widget.erMode && model.isEnabled[model.currentTab])) {

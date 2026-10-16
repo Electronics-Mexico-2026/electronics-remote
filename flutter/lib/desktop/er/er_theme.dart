@@ -5,6 +5,8 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
+import '../../common.dart';
+import '../../models/ab_model.dart';
 import '../../models/peer_model.dart';
 import '../../models/peer_tab_model.dart';
 import '../../models/platform_model.dart';
@@ -25,6 +27,39 @@ class ErColors {
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
+}
+
+// Regla del dueño: cada persona ve SOLO las computadoras a las que tiene
+// derecho. El sitio (usuario «sitio» del panel) le comparte una libreta
+// «Equipos de <usuario>» con la contraseña guardada; esa es la lista.
+const String kErMyComputers = 'Mis computadoras';
+const String kErNoComputers =
+    'Todavía no tienes computadoras asignadas. Pídele acceso al administrador.';
+
+String erMyAbName() {
+  final u = gFFI.userModel.userName.value;
+  return u.isEmpty ? '' : 'Equipos de $u';
+}
+
+bool erHasMyAb() {
+  final n = erMyAbName();
+  return n.isNotEmpty && gFFI.abModel.addressbooks.containsKey(n);
+}
+
+/// Deja como actual la libreta de la persona (si existe).
+Future<void> erSelectMyAb() async {
+  if (!erHasMyAb()) return;
+  final n = erMyAbName();
+  if (gFFI.abModel.currentName.value != n) {
+    await gFFI.abModel.setCurrentName(n);
+  }
+}
+
+/// Pide al panel las libretas y deja la de la persona.
+Future<void> erPullMyAb({bool force = true, bool quiet = true}) async {
+  await gFFI.abModel.pullAb(
+      force: force ? ForcePullAb.listAndCurrent : null, quiet: quiet);
+  await erSelectMyAb();
 }
 
 const String kErFontText = 'Montserrat';

@@ -73,6 +73,12 @@ class _ErMobileShellState extends State<ErMobileShell>
     WidgetsBinding.instance.addObserver(this);
     _autoRefresh = Timer.periodic(
         const Duration(seconds: 60), (_) => _refreshSilently());
+    // Al abrir, la lista principal es «Mis computadoras».
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && widget.selectedIndex == 0) {
+        _selectSection(PeerTabIndex.ab);
+      }
+    });
   }
 
   @override
@@ -118,7 +124,7 @@ class _ErMobileShellState extends State<ErMobileShell>
       case PeerTabIndex.lan:
         return 'Red local';
       case PeerTabIndex.ab:
-        return erAbDisplayName(gFFI.abModel.currentName.value);
+        return kErMyComputers;
       case PeerTabIndex.group:
         final g = gFFI.groupModel.selectedAccessibleItemName.value;
         return g.isEmpty ? 'Electronics' : g;
@@ -141,20 +147,6 @@ class _ErMobileShellState extends State<ErMobileShell>
     setState(() {});
     await bind.setLocalFlutterOption(
         k: kOptionPeerTabIndex, v: t.index.toString());
-  }
-
-  Future<void> _selectAddressBook(String name) async {
-    await _selectSection(PeerTabIndex.ab);
-    await gFFI.abModel.setCurrentName(name);
-    await bind.setLocalFlutterOption(k: kOptionCurrentAbName, v: name);
-    if (mounted) setState(() {});
-  }
-
-  void _selectGroupItem(String name, bool isDeviceGroup) {
-    final group = gFFI.groupModel;
-    group.isSelectedDeviceGroup.value = isDeviceGroup;
-    group.selectedAccessibleItemName.value = name;
-    _selectSection(PeerTabIndex.group, keepGroup: true);
   }
 
   Future<void> _load(PeerTabIndex t,
@@ -205,17 +197,7 @@ class _ErMobileShellState extends State<ErMobileShell>
 
   /// Sin una libreta elegida a mano, «Direcciones» abría «Mi libreta»
   /// vacía y no se veían las de la empresa: se pasa a la primera compartida.
-  Future<void> _erPickSharedAb() async {
-    final ab = gFFI.abModel;
-    if (bind.getLocalFlutterOption(k: kOptionCurrentAbName).isNotEmpty) return;
-    if (ab.currentName.value != ab.personalAddressBookName() ||
-        ab.current.peers.isNotEmpty) {
-      return;
-    }
-    final shared = ab.addressbooks.keys
-        .where((n) => n != ab.personalAddressBookName());
-    if (shared.isNotEmpty) await ab.setCurrentName(shared.first);
-  }
+  Future<void> _erPickSharedAb() => erSelectMyAb();
 
   List<Peer> _sectionPeers(PeerTabIndex t) {
     switch (t) {
@@ -456,6 +438,37 @@ class _ErMobileShellState extends State<ErMobileShell>
                     !login) {
                   return _loginPrompt(context);
                 }
+                if (tab == PeerTabIndex.ab &&
+                    gFFI.abModel.addressbooks.isNotEmpty &&
+                    !erHasMyAb() &&
+                    erMobilePanelError(tab).isEmpty) {
+                  // Sin libreta asignada no se enseña ninguna otra.
+                  return Column(children: [
+                    _statusBar(context, tab),
+                    Expanded(
+                      child: RefreshIndicator(
+                        color: ErColors.cyan,
+                        backgroundColor: ErColors.surface,
+                        onRefresh: () => _load(tab, force: true),
+                        child: ListView(children: [
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(24, 48, 24, 24),
+                            child: Text(kErNoComputers,
+                                textAlign: TextAlign.center,
+                                style: erTextStyle(context,
+                                    size: 15,
+                                    color: Colors.white.withOpacity(0.8))),
+                          ),
+                        ]),
+                      ),
+                    ),
+                  ]);
+                }
+                if (tab == PeerTabIndex.ab &&
+                    erHasMyAb() &&
+                    gFFI.abModel.currentName.value != erMyAbName()) {
+                  Future.microtask(erSelectMyAb);
+                }
                 final list = RefreshIndicator(
                   color: ErColors.cyan,
                   backgroundColor: ErColors.surface,
@@ -564,16 +577,8 @@ class _ErMobileShellState extends State<ErMobileShell>
         value: gFFI.peerTabModel,
         child: Consumer<PeerTabModel>(
           builder: (context, model, _) => Obx(() {
-            final group = gFFI.groupModel;
             final cur = PeerTabIndex.values[model.currentTab];
             final onPeers = idx == 0;
-            final selName = group.selectedAccessibleItemName.value;
-            final isDevGroup = group.isSelectedDeviceGroup.value;
-            final devGroups = group.deviceGroups.toList();
-            final users = group.users.toList();
-            final login = gFFI.userModel.userName.value.isNotEmpty;
-            final abNames = gFFI.abModel.addressbooks.keys.toList();
-            final abCur = gFFI.abModel.currentName.value;
             Widget section(PeerTabIndex t, IconData icon, String text) =>
                 _navItem(context, icon, text, onPeers && cur == t, () {
                   Navigator.of(context).pop();
@@ -598,63 +603,12 @@ class _ErMobileShellState extends State<ErMobileShell>
                       if (model.isEnabled[PeerTabIndex.fav.index])
                         section(PeerTabIndex.fav, Icons.star_border_rounded,
                             'Favoritos'),
-                      if (model.isEnabled[PeerTabIndex.ab.index]) ...[
-                        section(PeerTabIndex.ab, Icons.contacts_outlined,
-                            'Direcciones'),
-                        if (login && abNames.length > 1)
-                          for (final name in abNames)
-                            _navItem(
-                                context,
-                                Icons.menu_book_outlined,
-                                erAbDisplayName(name),
-                                onPeers &&
-                                    cur == PeerTabIndex.ab &&
-                                    abCur == name, () {
-                              Navigator.of(context).pop();
-                              _selectAddressBook(name);
-                            }, indent: 22),
-                      ],
+                      if (model.isEnabled[PeerTabIndex.ab.index])
+                        section(PeerTabIndex.ab, Icons.computer_rounded,
+                            kErMyComputers),
                       if (model.isEnabled[PeerTabIndex.lan.index])
                         section(PeerTabIndex.lan, Icons.wifi_tethering_rounded,
                             'Red local'),
-                      if (model.isEnabled[PeerTabIndex.group.index]) ...[
-                        _navItem(
-                            context,
-                            Icons.groups_2_outlined,
-                            'Electronics',
-                            onPeers &&
-                                cur == PeerTabIndex.group &&
-                                selName.isEmpty, () {
-                          Navigator.of(context).pop();
-                          _selectSection(PeerTabIndex.group);
-                        }, bold: true),
-                        if (login)
-                          for (final g in devGroups)
-                            _navItem(
-                                context,
-                                Icons.desktop_windows_outlined,
-                                g.name,
-                                onPeers &&
-                                    cur == PeerTabIndex.group &&
-                                    isDevGroup &&
-                                    selName == g.name, () {
-                              Navigator.of(context).pop();
-                              _selectGroupItem(g.name, true);
-                            }, indent: 22),
-                        if (login && devGroups.isEmpty)
-                          for (final u in users)
-                            _navItem(
-                                context,
-                                Icons.person_outline_rounded,
-                                u.displayNameOrName,
-                                onPeers &&
-                                    cur == PeerTabIndex.group &&
-                                    !isDevGroup &&
-                                    selName == u.name, () {
-                              Navigator.of(context).pop();
-                              _selectGroupItem(u.name, false);
-                            }, indent: 22),
-                      ],
                       const Divider(height: 18),
                       if (serverIdx >= 0)
                         _navItem(
@@ -870,7 +824,8 @@ class ErMobileState {
 }
 
 String erAbDisplayName(String name) {
-  if (name.isEmpty) return 'Direcciones';
+  if (name.isEmpty) return kErMyComputers;
+  if (name == erMyAbName()) return kErMyComputers;
   if (name == gFFI.abModel.personalAddressBookName()) return 'Mi libreta';
   return name;
 }
@@ -938,6 +893,7 @@ String erMobileEmptyText() {
   if (peerSearchText.value.trim().isNotEmpty) {
     return 'Ningún equipo $where coincide con la búsqueda.';
   }
+  if (tab == PeerTabIndex.ab) return kErNoComputers;
   return 'No hay equipos $where. Jala hacia abajo para actualizar.';
 }
 
