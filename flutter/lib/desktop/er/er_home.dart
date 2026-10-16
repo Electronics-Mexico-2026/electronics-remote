@@ -621,56 +621,82 @@ class _ErHomeState extends State<ErHome> with WindowListener {
 
   Widget _sidebar(BuildContext context) {
     final theme = Theme.of(context);
+    // Mismo fondo que el centro: antes era colorScheme.background y, sin la
+    // lista de grupos, quedaba un bloque gris vacío.
     return Container(
-      color: theme.colorScheme.background,
-      child: Column(
-        children: [
-          Expanded(
-            child: ChangeNotifierProvider.value(
-              value: gFFI.peerTabModel,
-              child: Consumer<PeerTabModel>(
-                builder: (context, model, _) => Obx(() {
-                  final cur = PeerTabIndex.values[model.currentTab];
-                  return ListView(
-                    padding: const EdgeInsets.symmetric(vertical: 6),
+      color: theme.scaffoldBackgroundColor,
+      child: ChangeNotifierProvider.value(
+        value: gFFI.peerTabModel,
+        child: Consumer<PeerTabModel>(
+          builder: (context, model, _) => Obx(() {
+            final cur = PeerTabIndex.values[model.currentTab];
+            final ab = gFFI.abModel;
+            final mine = erHasMyAb() && ab.currentName.value == erMyAbName();
+            final count = mine ? ab.currentAbPeers.length : 0;
+            final login = gFFI.userModel.userName.value.isNotEmpty;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 12, 6, 4),
+                  child: Row(
                     children: [
-                      if (model.isEnabled[PeerTabIndex.recent.index])
-                        _navItem(
-                            context,
-                            Icons.history_rounded,
-                            'Recientes',
-                            cur == PeerTabIndex.recent,
-                            () => _selectSection(PeerTabIndex.recent)),
-                      if (model.isEnabled[PeerTabIndex.fav.index])
-                        _navItem(
-                            context,
-                            Icons.star_border_rounded,
-                            'Favoritos',
-                            cur == PeerTabIndex.fav,
-                            () => _selectSection(PeerTabIndex.fav)),
-                      if (model.isEnabled[PeerTabIndex.ab.index])
-                        _navItem(
-                            context,
-                            Icons.grid_view_rounded,
-                            kErMyComputers,
-                            cur == PeerTabIndex.ab,
-                            () => _selectSection(PeerTabIndex.ab)),
-                      if (model.isEnabled[PeerTabIndex.lan.index])
-                        _navItem(
-                            context,
-                            Icons.wifi_tethering_rounded,
-                            'Red local',
-                            cur == PeerTabIndex.lan,
-                            () => _selectSection(PeerTabIndex.lan)),
+                      Expanded(
+                        child: Text(kErMyComputers,
+                            overflow: TextOverflow.ellipsis,
+                            style: erTitleStyle(context, size: 15)),
+                      ),
+                      Tooltip(
+                        message: 'Actualizar (F5)',
+                        child: IconButton(
+                          visualDensity: VisualDensity.compact,
+                          icon: const Icon(Icons.refresh_rounded,
+                              size: 18, color: ErColors.cyan),
+                          onPressed: () {
+                            _selectSection(PeerTabIndex.ab);
+                            _refresh();
+                          },
+                        ),
+                      ),
                     ],
-                  );
-                }),
-              ),
-            ),
-          ),
-          Divider(height: 1, color: theme.dividerColor),
-          _thisDevicePanel(context),
-        ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+                  child: Text(
+                      !login
+                          ? 'Inicia sesión para ver tus equipos'
+                          : (count == 0
+                              ? 'Sin computadoras asignadas'
+                              : '$count ${count == 1 ? 'computadora' : 'computadoras'}'),
+                      style: erTextStyle(context,
+                          size: 12,
+                          color: theme.textTheme.bodySmall?.color
+                              ?.withOpacity(0.7))),
+                ),
+                if (model.isEnabled[PeerTabIndex.ab.index])
+                  _navItem(context, Icons.grid_view_rounded, kErMyComputers,
+                      cur == PeerTabIndex.ab,
+                      () => _selectSection(PeerTabIndex.ab)),
+                if (model.isEnabled[PeerTabIndex.recent.index])
+                  _navItem(context, Icons.history_rounded, 'Recientes',
+                      cur == PeerTabIndex.recent,
+                      () => _selectSection(PeerTabIndex.recent)),
+                if (model.isEnabled[PeerTabIndex.fav.index])
+                  _navItem(context, Icons.star_border_rounded, 'Favoritos',
+                      cur == PeerTabIndex.fav,
+                      () => _selectSection(PeerTabIndex.fav)),
+                if (model.isEnabled[PeerTabIndex.lan.index])
+                  _navItem(context, Icons.wifi_tethering_rounded, 'Red local',
+                      cur == PeerTabIndex.lan,
+                      () => _selectSection(PeerTabIndex.lan)),
+                const Spacer(),
+                Divider(height: 1, color: theme.dividerColor),
+                _thisDevicePanel(context),
+              ],
+            );
+          }),
+        ),
       ),
     );
   }

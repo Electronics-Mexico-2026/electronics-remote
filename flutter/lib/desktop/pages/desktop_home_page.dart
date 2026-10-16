@@ -94,9 +94,9 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         alignment: Alignment.center,
         child: loadLogo(),
       ),
-      buildTip(context),
+      if (isIncomingOnly) _erEquipoTip(context) else buildTip(context),
       if (!isOutgoingOnly) buildIDBoard(context),
-      if (!isOutgoingOnly) buildPasswordBoard(context),
+      if (!isOutgoingOnly && !isIncomingOnly) buildPasswordBoard(context),
       FutureBuilder<Widget>(
         future: Future.value(
             Obx(() => buildHelpCards(stateGlobal.updateUrl.value))),
@@ -186,6 +186,33 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   /// Electronics Remote: lo de la columna izquierda original (ID y contraseña
   /// de esta PC y avisos de instalación/actualización/permisos) dentro de la
   /// sección «Este equipo» de la barra lateral.
+  /// «Electronics Remote Equipo» (solo recibir): la ventana no tiene nada
+  /// que tocar a propósito; se dice claro en lugar de dejarla muda.
+  Widget _erEquipoTip(BuildContext context) {
+    final textColor = Theme.of(context).textTheme.titleLarge?.color;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 12, 16, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Este equipo se controla a distancia',
+              style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w600,
+                  color: textColor)),
+          const SizedBox(height: 6),
+          Text(
+              'Aquí no hay nada que configurar: déjalo encendido y conectado. '
+              'Quien tenga permiso entra desde Electronics Remote con este ID. '
+              'Mientras alguien lo controla, esta ventana se oscurece y no se '
+              'puede tocar desde la sesión remota (es a propósito).',
+              style: TextStyle(
+                  fontSize: 13, color: textColor?.withOpacity(0.75))),
+        ],
+      ),
+    );
+  }
+
   Widget _erThisDevice(BuildContext context) {
     final isOutgoingOnly = bind.isOutgoingOnly();
     return ChangeNotifierProvider.value(
@@ -195,7 +222,18 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         children: [
           if (!isOutgoingOnly) buildPresetPasswordWarning(),
           if (!isOutgoingOnly) buildIDBoard(context),
-          if (!isOutgoingOnly) buildPasswordBoard(context),
+          // Entramos con la contraseña permanente guardada: la de un solo uso
+          // solo se muestra si de verdad hay una (no «-»).
+          if (!isOutgoingOnly)
+            ValueListenableBuilder<TextEditingValue>(
+              valueListenable: gFFI.serverModel.serverPasswd,
+              builder: (context, v, _) {
+                final t = v.text.trim();
+                return t.isEmpty || t == '-'
+                    ? const SizedBox.shrink()
+                    : buildPasswordBoard(context);
+              },
+            ),
           Obx(() => buildHelpCards(stateGlobal.updateUrl.value)),
           const SizedBox(height: 8),
         ],
@@ -453,6 +491,17 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   }
 
   Widget buildHelpCards(String updateUrl) {
+    // «Equipo»: el servicio se actualiza solo y en silencio; sin botón (que
+    // además no se puede tocar desde una sesión remota).
+    if (updateUrl.isNotEmpty && bind.isIncomingOnly()) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(20, 10, 16, 4),
+        child: Text(
+            'Hay una versión nueva (${bind.mainGetNewVersion()}): se instala '
+            'sola en cuanto nadie esté conectado.',
+            style: const TextStyle(fontSize: 12.5)),
+      );
+    }
     if (updateUrl.isNotEmpty && !isCardClosed) {
       final isToUpdate = isWindows && bind.mainIsInstalled();
       String btnText = isToUpdate ? 'Actualizar' : 'Download';
