@@ -69,6 +69,7 @@ class _ErMobileShellState extends State<ErMobileShell>
     super.initState();
     // Lo mismo que hacía ConnectionPage (la vista que esta reemplaza).
     _uniLinks = listenUniLinks();
+    erInstallErrorCapture();
     WidgetsBinding.instance.addObserver(this);
     _autoRefresh = Timer.periodic(
         const Duration(seconds: 60), (_) => _refreshSilently());
@@ -83,9 +84,11 @@ class _ErMobileShellState extends State<ErMobileShell>
   /// actual y el estado en línea, sin avisos (sin red solo se queda la lista
   /// que ya había).
   void _refreshSilently() {
-    if (!mounted || widget.selectedIndex != 0 || !stateGlobal.isInMainPage) {
-      return;
-    }
+    if (!mounted || widget.selectedIndex != 0) return;
+    if (!(ModalRoute.of(context)?.isCurrent ?? true)) return;
+    // Al volver de una sesión con «atrás» se quedaba en false y también
+    // detenía la consulta de en línea de la lista.
+    stateGlobal.isInMainPage = true;
     if (WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
       return;
     }
@@ -115,7 +118,7 @@ class _ErMobileShellState extends State<ErMobileShell>
       case PeerTabIndex.lan:
         return 'Red local';
       case PeerTabIndex.ab:
-        return 'Direcciones';
+        return erAbDisplayName(gFFI.abModel.currentName.value);
       case PeerTabIndex.group:
         final g = gFFI.groupModel.selectedAccessibleItemName.value;
         return g.isEmpty ? 'Electronics' : g;
@@ -123,7 +126,7 @@ class _ErMobileShellState extends State<ErMobileShell>
   }
 
   Future<void> _selectSection(PeerTabIndex t, {bool keepGroup = false}) async {
-    if (t == PeerTabIndex.group && !keepGroup) {
+    if (t != PeerTabIndex.group || !keepGroup) {
       gFFI.groupModel.selectedAccessibleItemName.value = '';
     }
     if (t.index != _tabs.currentTab) {
@@ -138,6 +141,13 @@ class _ErMobileShellState extends State<ErMobileShell>
     setState(() {});
     await bind.setLocalFlutterOption(
         k: kOptionPeerTabIndex, v: t.index.toString());
+  }
+
+  Future<void> _selectAddressBook(String name) async {
+    await _selectSection(PeerTabIndex.ab);
+    await gFFI.abModel.setCurrentName(name);
+    await bind.setLocalFlutterOption(k: kOptionCurrentAbName, v: name);
+    if (mounted) setState(() {});
   }
 
   void _selectGroupItem(String name, bool isDeviceGroup) {
@@ -174,6 +184,7 @@ class _ErMobileShellState extends State<ErMobileShell>
       case PeerTabIndex.ab:
         await gFFI.abModel.pullAb(
             force: force ? ForcePullAb.listAndCurrent : null, quiet: quiet);
+        await _erPickSharedAb();
         break;
       case PeerTabIndex.group:
         await gFFI.groupModel.pull(force: force, quiet: quiet);
@@ -190,6 +201,20 @@ class _ErMobileShellState extends State<ErMobileShell>
       final ids = _sectionPeers(t).map((e) => e.id).toList();
       if (ids.isNotEmpty) bind.queryOnlines(ids: ids);
     }
+  }
+
+  /// Sin una libreta elegida a mano, «Direcciones» abría «Mi libreta»
+  /// vacía y no se veían las de la empresa: se pasa a la primera compartida.
+  Future<void> _erPickSharedAb() async {
+    final ab = gFFI.abModel;
+    if (bind.getLocalFlutterOption(k: kOptionCurrentAbName).isNotEmpty) return;
+    if (ab.currentName.value != ab.personalAddressBookName() ||
+        ab.current.peers.isNotEmpty) {
+      return;
+    }
+    final shared = ab.addressbooks.keys
+        .where((n) => n != ab.personalAddressBookName());
+    if (shared.isNotEmpty) await ab.setCurrentName(shared.first);
   }
 
   List<Peer> _sectionPeers(PeerTabIndex t) {
@@ -249,17 +274,9 @@ class _ErMobileShellState extends State<ErMobileShell>
                 ),
               )
             : null,
-        body: Stack(
-          children: [
-            Positioned.fill(
-                child: idx == 0
-                    ? _peersBody(context)
-                    : widget.pages[idx] as Widget),
-            // Barra inferior original oculta: el chat y «Compartir pantalla»
-            // la usan para saber o cambiar la página actual.
-            Offstage(child: widget.navBar),
-          ],
-        ),
+        body: erShellBody(
+            idx == 0 ? _peersBody(context) : widget.pages[idx] as Widget,
+            widget.navBar),
       ),
     ));
   }
@@ -555,6 +572,8 @@ class _ErMobileShellState extends State<ErMobileShell>
             final devGroups = group.deviceGroups.toList();
             final users = group.users.toList();
             final login = gFFI.userModel.userName.value.isNotEmpty;
+            final abNames = gFFI.abModel.addressbooks.keys.toList();
+            final abCur = gFFI.abModel.currentName.value;
             Widget section(PeerTabIndex t, IconData icon, String text) =>
                 _navItem(context, icon, text, onPeers && cur == t, () {
                   Navigator.of(context).pop();
@@ -579,9 +598,22 @@ class _ErMobileShellState extends State<ErMobileShell>
                       if (model.isEnabled[PeerTabIndex.fav.index])
                         section(PeerTabIndex.fav, Icons.star_border_rounded,
                             'Favoritos'),
-                      if (model.isEnabled[PeerTabIndex.ab.index])
+                      if (model.isEnabled[PeerTabIndex.ab.index]) ...[
                         section(PeerTabIndex.ab, Icons.contacts_outlined,
                             'Direcciones'),
+                        if (login && abNames.length > 1)
+                          for (final name in abNames)
+                            _navItem(
+                                context,
+                                Icons.menu_book_outlined,
+                                erAbDisplayName(name),
+                                onPeers &&
+                                    cur == PeerTabIndex.ab &&
+                                    abCur == name, () {
+                              Navigator.of(context).pop();
+                              _selectAddressBook(name);
+                            }, indent: 22),
+                      ],
                       if (model.isEnabled[PeerTabIndex.lan.index])
                         section(PeerTabIndex.lan, Icons.wifi_tethering_rounded,
                             'Red local'),
@@ -818,9 +850,60 @@ class ErMobilePeersView extends BasePeersView {
   }
 }
 
+/// Cuerpo de la pantalla con la barra inferior original oculta (el chat y
+/// «Compartir pantalla» la usan para saber o cambiar la página actual).
+/// `expand`: el Scaffold da al cuerpo un alto sin mínimo y, sin él, el Stack
+/// tomaba el tamaño de su único hijo sin posición, el Offstage (0×0): la
+/// lista medía 0 de alto y no se veía nada.
+Widget erShellBody(Widget content, Widget navBar) => Stack(
+      fit: StackFit.expand,
+      children: [
+        Positioned.fill(child: content),
+        Offstage(child: navBar),
+      ],
+    );
+
 class ErMobileState {
   static final lastRefresh = Rxn<DateTime>();
   static final shownCount = 0.obs;
+  static final List<String> errors = [];
+}
+
+String erAbDisplayName(String name) {
+  if (name.isEmpty) return 'Direcciones';
+  if (name == gFFI.abModel.personalAddressBookName()) return 'Mi libreta';
+  return name;
+}
+
+bool _erErrorCaptureInstalled = false;
+
+/// Guarda las últimas 5 excepciones de Flutter para el diagnóstico y hace
+/// que un widget que truena muestre un texto en vez de quedar en blanco.
+void erInstallErrorCapture() {
+  if (_erErrorCaptureInstalled) return;
+  _erErrorCaptureInstalled = true;
+  final previous = FlutterError.onError;
+  FlutterError.onError = (details) {
+    final stack = (details.stack?.toString() ?? '')
+        .split('\n')
+        .where((l) => l.trim().isNotEmpty)
+        .take(6)
+        .join('\n');
+    final at = DateTime.now().toIso8601String().substring(11, 19);
+    ErMobileState.errors.add('[$at] ${details.exceptionAsString()}\n$stack');
+    while (ErMobileState.errors.length > 5) {
+      ErMobileState.errors.removeAt(0);
+    }
+    previous?.call(details);
+  };
+  ErrorWidget.builder = (details) => Material(
+        color: ErColors.night,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Text('Error al mostrar la lista: ${details.exceptionAsString()}',
+              style: const TextStyle(color: Color(0xFFFFB4A9), fontSize: 13)),
+        ),
+      );
 }
 
 PeerTabIndex _erCurrentTab() =>
@@ -889,6 +972,22 @@ String erMobileDiagnostics() {
         '${ErMobileState.shownCount.value}')
     ..writeln('Última actualización: '
         '${ErMobileState.lastRefresh.value ?? '(nunca)'}');
+  final ab = gFFI.abModel;
+  final abPeers = ab.peersModel.peers;
+  b
+    ..writeln('Libretas: ${ab.addressbooks.entries.map((e) => '${erAbDisplayName(e.key)}'
+        ' (${e.value.initialized ? e.value.peers.length : 'sin leer'})').join(', ')}')
+    ..writeln('Libreta actual: ${erAbDisplayName(ab.currentName.value)}'
+        ' · ${abPeers.length} entradas'
+        '${abPeers.isEmpty ? '' : ': ${abPeers.take(30).map((e) => e.id).join(', ')}'}');
+  if (ErMobileState.errors.isEmpty) {
+    b.writeln('Excepciones: (ninguna)');
+  } else {
+    b.writeln('Excepciones (últimas ${ErMobileState.errors.length}):');
+    for (final e in ErMobileState.errors) {
+      b.writeln(e);
+    }
+  }
   for (final p in peers.take(30)) {
     final name = p.alias.isNotEmpty ? p.alias : p.hostname;
     b.writeln('- ${p.id} «$name» grupo=«${p.device_group_name}»'
@@ -958,7 +1057,8 @@ Widget erMobilePeerGrid(List<Peer> peers, Widget Function(Peer) item) {
     final cols = w >= kErWideWidth ? (w / 270).floor().clamp(2, 6) : 1;
     const gap = 10.0;
     const pad = 10.0;
-    final cw = (w - pad * 2 - gap * (cols - 1)) / cols;
+    // Con ancho 0 daba una proporción negativa (aserción en debug).
+    final cw = ((w - pad * 2 - gap * (cols - 1)) / cols).clamp(1.0, 1e6);
     final ch = cw * (cols == 1 ? 0.52 : 0.62) + 46;
     return GridView.builder(
       physics: const AlwaysScrollableScrollPhysics(),
