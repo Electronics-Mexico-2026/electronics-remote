@@ -54,19 +54,19 @@ jobs:
           $exe = Join-Path (Join-Path $env:ProgramFiles $app) "$app.exe"
           for ($i = 0; $i -lt 60; $i++) { if ((Get-Service $app -ErrorAction SilentlyContinue).Status -eq 'Running' -and (Test-Path $exe)) { break }; Start-Sleep 5 }
           if (-not (Test-Path $exe)) { Write-Host "::error::no se instalo $env:OLD_TAG"; exit 1 }
-          $antes = (Get-FileHash $exe).Hash
+          $antes = (Get-FileHash (Join-Path (Split-Path $exe) "librustdesk.dll")).Hash
           Write-Host "instalada $env:OLD_TAG : $antes"
           $p = Start-Process -FilePath (Resolve-Path "dist/$app-x64.exe") -ArgumentList '--update' -PassThru
           $null = $p.WaitForExit(240000)
           $ok = $false
           for ($i = 0; $i -lt 60; $i++) {
             Start-Sleep 5
-            if ((Test-Path $exe) -and ((Get-FileHash $exe).Hash -ne $antes) -and ((Get-Service $app -ErrorAction SilentlyContinue).Status -eq 'Running')) { $ok = $true; break }
+            if ((Test-Path $exe) -and ((Get-FileHash (Join-Path (Split-Path $exe) "librustdesk.dll")).Hash -ne $antes) -and ((Get-Service $app -ErrorAction SilentlyContinue).Status -eq 'Running')) { $ok = $true; break }
           }
           Get-ChildItem (Split-Path $exe) | Select-Object -First 15 | Format-Table Name, Length, LastWriteTime | Out-String | Write-Host
           Get-CimInstance Win32_Service -Filter "Name='$app'" | Format-List Name, State, StartMode, StartName, PathName | Out-String | Write-Host
           foreach ($d in @("C:\Windows\System32\config\systemprofile\AppData\Roaming\$app\log", "C:\Windows\ServiceProfiles\LocalService\AppData\Roaming\$app\log", "$env:APPDATA\$app\log")) {
             if (Test-Path $d) { Get-ChildItem -Recurse $d -Filter *.log | ForEach-Object { Write-Host "== $($_.FullName)"; Get-Content $_.FullName -Tail 40 } }
           }
-          if (-not $ok) { Write-Host "::error::--update no reemplazo el exe instalado o el servicio no quedo corriendo"; exit 1 }
+          if (-not $ok) { Write-Host "::error::--update no reemplazo librustdesk.dll o el servicio no quedo corriendo"; exit 1 }
           Write-Host "OK: $env:OLD_TAG -> nueva, en silencio, servicio corriendo"
