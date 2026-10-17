@@ -2837,7 +2837,7 @@ pub fn main_set_common(_key: String, _value: String) {
         } else if _key == "update-me" {
             if let Some(new_version_file) = get_download_file_from_url(&_value) {
                 if !crate::common::er_update_file_sha256_ok(&new_version_file) {
-                    fs::remove_file(&new_version_file).ok();
+                    std::fs::remove_file(&new_version_file).ok();
                     return;
                 }
                 log::debug!(
