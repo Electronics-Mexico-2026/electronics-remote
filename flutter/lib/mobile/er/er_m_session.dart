@@ -464,16 +464,25 @@ class _ErSessionOverlayState extends State<ErSessionOverlay> {
     return !m.viewOnly && m.keyboard;
   }
 
+  /// ¿Está abierto el teclado del celular? El Scaffold de la sesión achica
+  /// su body por arriba del teclado (resizeToAvoidBottomInset), así que aquí
+  /// adentro `MediaQuery.viewInsets.bottom` siempre vale 0: se lee el de la
+  /// ventana y, por el teclado flotante/dividido del Fold, también el estado
+  /// que lleva la página remota.
+  bool _erKbOpen(BuildContext c) =>
+      MediaQueryData.fromView(View.of(c)).viewInsets.bottom > 0 ||
+      widget.actions.keyboardVisible();
+
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
-    final kb = MediaQuery.of(context).viewInsets.bottom > 0;
+    final kb = _erKbOpen(context);
     // Como RealVNC: las teclas extra viven con el teclado. Si el teclado del
     // celular se cierra (atrás, gesto), la fila también se va y el campo
     // oculto suelta el foco para que el teclado no vuelva a salir solo.
     if (_kbWasVisible && !kb && _keysOn) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || MediaQuery.of(context).viewInsets.bottom > 0) return;
+        if (!mounted || _erKbOpen(context)) return;
         setState(() => _keysOn = false);
         widget.actions.hideKeyboard();
       });

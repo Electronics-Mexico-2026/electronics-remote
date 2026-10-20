@@ -267,7 +267,10 @@ class MainActivity : FlutterActivity() {
             // make sure result will be invoked, otherwise flutter will await forever
             when (call.method) {
                 "er_update_apk" -> {
-                    result.success(ErUpdater.downloadAndInstall(activity, call.arguments as? String ?: ""))
+                    val args = call.arguments
+                    val url = (args as? Map<*, *>)?.get("url") as? String ?: args as? String ?: ""
+                    val sha256 = (args as? Map<*, *>)?.get("sha256") as? String ?: ""
+                    result.success(ErUpdater.downloadAndInstall(activity, url, sha256))
                 }
                 "init_service" -> {
                     Intent(activity, MainService::class.java).also {

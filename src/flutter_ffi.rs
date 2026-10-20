@@ -2723,6 +2723,18 @@ pub fn main_get_common(key: String) -> String {
             crate::common::ER_UPDATE_STATE.lock().unwrap().clone()
         } else if key == "er-version" {
             crate::common::er_version().to_owned()
+        } else if key == "er-apk-sha256" {
+            // Vacío si no vino del bucket (respaldo de GitHub, sin sha256).
+            let update_url = crate::common::SOFTWARE_UPDATE_URL.lock().unwrap().clone();
+            if !update_url.starts_with(crate::common::ER_BUCKET_URL) {
+                return String::new();
+            }
+            crate::common::ER_UPDATE_SHA256
+                .lock()
+                .unwrap()
+                .get(crate::common::ER_APK_ASSET)
+                .cloned()
+                .unwrap_or_default()
         } else if key == "er-apk-url" {
             let update_url = crate::common::SOFTWARE_UPDATE_URL.lock().unwrap().clone();
             if update_url.starts_with(crate::common::ER_BUCKET_URL) {

@@ -122,9 +122,12 @@ Future<void> erAutoUpdateAndroid() async {
 
 Future<void> erUpdateApk({bool quiet = false}) async {
   final apkUrl = bind.mainGetCommonSync(key: 'er-apk-url');
+  // sha256 de latest.json del bucket; vacío con el respaldo de GitHub.
+  final apkSha256 = bind.mainGetCommonSync(key: 'er-apk-sha256');
   bool ok = false;
   try {
-    ok = await gFFI.invokeMethod('er_update_apk', apkUrl);
+    ok = await gFFI.invokeMethod(
+        'er_update_apk', {'url': apkUrl, 'sha256': apkSha256});
   } catch (e) {
     debugPrint('er_update_apk: $e');
   }

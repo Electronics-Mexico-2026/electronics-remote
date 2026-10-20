@@ -259,6 +259,11 @@ class FfiModel with ChangeNotifier {
     _inputBlocked = false;
     _timer?.cancel();
     _timer = null;
+    // Electronics Remote: cada sesión nueva empieza con sus reintentos
+    // completos (en Android se reusa gFFI entre sesiones).
+    _reconnects = 1;
+    _erNetRetries = 0;
+    _offlineReconnectStartTime = null;
     _androidDocumentPickerActive = false;
     _androidDocumentPickerInterruptedConnection = false;
     resetRestartReconnectState();
@@ -1045,8 +1050,8 @@ class FfiModel with ChangeNotifier {
   /// Electronics Remote (Android): «Failed to connect to <servidor>» es que
   /// el celular no llegó al servidor (cambio de red, la app volvió de segundo
   /// plano). RustDesk no reintenta ese error y al cerrar la sesión se pierde
-  /// la contraseña ya escrita, así que se reintenta solo hasta 6 veces
-  /// (1+2+4+8+16+32 s) dentro de la misma sesión.
+  /// la contraseña ya escrita, así que se reintenta solo dentro de la misma
+  /// sesión: 1, 2, 4, 8 y luego cada 10 s, unos 5 minutos en total.
   bool erShouldRetryNetwork(String type, String title, String text) {
     if (!isAndroid) return false;
     if (type != 'error' || title != 'Connection Error') return false;
@@ -1055,7 +1060,7 @@ class FfiModel with ChangeNotifier {
         t.contains('timed out') ||
         t.contains('network is unreachable');
     if (!net) return false;
-    if (_erNetRetries >= 6) return false;
+    if (_erNetRetries >= kErNetRetryMax) return false;
     _erNetRetries++;
     return true;
   }
@@ -1127,8 +1132,14 @@ class FfiModel with ChangeNotifier {
         reconnect(dialogManager, sessionId, false);
       });
       _reconnects *= 2;
+      // Electronics Remote: sin red se reintenta cada 10 s como máximo, para
+      // reconectar pronto cuando la red regresa (antes esperaba hasta 64 s).
+      if (_erNetRetries > 0 && _reconnects > kErNetRetryMaxDelay) {
+        _reconnects = kErNetRetryMaxDelay;
+      }
     } else {
       _reconnects = 1;
+      _erNetRetries = 0;
       _offlineReconnectStartTime = null;
     }
   }
@@ -4480,6 +4491,11 @@ class FFI {
 
 const kInvalidResolutionValue = -1;
 const kVirtualDisplayResolutionValue = 0;
+
+/// Electronics Remote: reintentos solos sin red (ver erShouldRetryNetwork):
+/// 1+2+4+8 s y luego cada 10 s, ~5 minutos en total.
+const kErNetRetryMax = 32;
+const kErNetRetryMaxDelay = 10;
 
 class Display {
   double x = 0;
