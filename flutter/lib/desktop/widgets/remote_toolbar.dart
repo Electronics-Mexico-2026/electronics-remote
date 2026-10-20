@@ -25,6 +25,7 @@ import './kb_layout_type_chooser.dart';
 import 'package:flutter_hbb/utils/scale.dart';
 import 'package:flutter_hbb/common/widgets/custom_scale_base.dart';
 import 'package:flutter_hbb/common/er_f8.dart';
+import 'package:flutter_hbb/common/er_toolbar_prefs.dart';
 import '../er/er_session_menu.dart';
 
 enum _ToolbarEdge { top, right, bottom, left }
@@ -287,6 +288,10 @@ class ToolbarState {
 
       collapse.value = results[0] ?? false;
       hide.value = results[1] ?? false;
+      final erCollapsed = ErToolbarPrefs.parse(
+              bind.getLocalFlutterOption(k: kOptionRemoteMenubarState))
+          .collapsed;
+      if (erCollapsed != null) collapse.value = erCollapsed;
     } finally {
       _isInitializing = false;
       initialized.value = true;
@@ -297,6 +302,7 @@ class ToolbarState {
     bind.sessionToggleOption(
         sessionId: sessionId, value: kOptionCollapseToolbar);
     collapse.value = !collapse.value;
+    _erSave(collapsed: collapse.value);
   }
 
   // Switch hide state for entire toolbar visibility
@@ -320,8 +326,16 @@ class ToolbarState {
   }
 
   _savePin() async {
+    _erSave(pin: _pin.value);
+  }
+
+  void _erSave({bool? pin, bool? collapsed}) {
     bind.setLocalFlutterOption(
-        k: kOptionRemoteMenubarState, v: jsonEncode({'pin': _pin.value}));
+        k: kOptionRemoteMenubarState,
+        v: ErToolbarPrefs.merge(
+            bind.getLocalFlutterOption(k: kOptionRemoteMenubarState),
+            pin: pin,
+            collapsed: collapsed));
   }
 }
 
@@ -486,6 +500,11 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
 
   int get windowId => stateGlobal.windowId;
 
+  // Electronics Remote: la barra se esconde sola solo si el mouse no está
+  // encima, y la pestañita se abre tras un momento de mouse encima.
+  bool _erOverToolbar = false;
+  Timer? _erHoverOpenTimer;
+
   // Electronics Remote: menú de sesión tipo RealVNC (botón ☰ y F8).
   final _erMenuController = MenuController();
   late final VoidCallback _erF8Opener = () {
@@ -530,7 +549,7 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
     // apply (allow-* prefix => default false). Keeping it raw-string would
     // diverge from how _OptionCheckBox displays the same key.
     final multiEdgeEnabled =
-        mainGetLocalBoolOptionSync(kOptionAllowMultiEdgeToolbarDock);
+        erToolbarMultiEdge();
     final cached = _cachedToolbarDockingOptions(widget.ffi.sessionId);
     if (cached == null && pi.isSet.isFalse) {
       return;
@@ -545,8 +564,11 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
       return;
     }
 
-    final savedFraction = await bind.sessionGetOption(
-        sessionId: widget.ffi.sessionId, arg: kOptionRemoteMenubarFraction);
+    final erDock = ErToolbarPrefs.parse(
+        bind.getLocalFlutterOption(k: kOptionRemoteMenubarState));
+    final savedFraction = erDock.fraction?.toString() ??
+        await bind.sessionGetOption(
+            sessionId: widget.ffi.sessionId, arg: kOptionRemoteMenubarFraction);
     // Backward compat: legacy horizontal-only position.
     final legacyFraction = await bind.sessionGetOption(
         sessionId: widget.ffi.sessionId, arg: _legacyRemoteMenubarDragX);
@@ -558,8 +580,9 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
     if (!multiEdgeEnabled) {
       nextEdge = _ToolbarEdge.top;
     } else if (force || wasMultiEdgeEnabled || cached == null) {
-      final edgeStr = await bind.sessionGetOption(
-          sessionId: widget.ffi.sessionId, arg: kOptionRemoteMenubarEdge);
+      final edgeStr = erDock.edge ??
+          await bind.sessionGetOption(
+              sessionId: widget.ffi.sessionId, arg: kOptionRemoteMenubarEdge);
       if (!mounted || syncSerial != _dockingOptionSyncSerial) return;
       nextEdge = _parseToolbarEdge(edgeStr);
     } else {
@@ -644,7 +667,7 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
 
     final cached = _cachedToolbarDockingOptions(widget.ffi.sessionId);
     final multiEdgeEnabled =
-        mainGetLocalBoolOptionSync(kOptionAllowMultiEdgeToolbarDock);
+        erToolbarMultiEdge();
     final shouldResetToTop =
         cached != null && cached.multiEdgeEnabled && !multiEdgeEnabled;
     if (cached != null && !shouldResetToTop) {
@@ -661,7 +684,7 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
     });
 
     _debouncerHide = Debouncer<int>(
-      Duration(milliseconds: 5000),
+      kErToolbarAutoHide,
       onChanged: _debouncerHideProc,
       initialValue: 0,
     );
@@ -687,7 +710,11 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
   }
 
   _debouncerHideProc(int v) {
-    if (!pin && collapse.isFalse && _isCursorOverImage && _dragging.isFalse) {
+    if (!pin &&
+        collapse.isFalse &&
+        _isCursorOverImage &&
+        !_erOverToolbar &&
+        _dragging.isFalse) {
       collapse.value = true;
     }
   }
@@ -695,6 +722,7 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
   @override
   dispose() {
     erUnregisterF8Opener(widget.ffi.sessionId.toString(), _erF8Opener);
+    _erHoverOpenTimer?.cancel();
     ++_dockingOptionSyncSerial;
     widget.onEnterOrLeaveImageCleaner(identityHashCode(this));
     super.dispose();
@@ -730,9 +758,17 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
         alignment: _alignmentForEdge(edge, _fraction.value),
         child: KeyedSubtree(
           key: _toolbarKey,
-          child: collapse.isFalse
-              ? _buildToolbar(context, edge, isHorizontal)
-              : _buildDraggableCollapse(context, edge, isHorizontal),
+          child: MouseRegion(
+            onEnter: (_) => _erOverToolbar = true,
+            onExit: (_) {
+              _erOverToolbar = false;
+              _erHoverOpenTimer?.cancel();
+              triggerAutoHide();
+            },
+            child: collapse.isFalse
+                ? _buildToolbar(context, edge, isHorizontal)
+                : _buildDraggableCollapse(context, edge, isHorizontal),
+          ),
         ),
       );
 
@@ -792,9 +828,15 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
         child: MouseRegion(
           onEnter: (_) {
             if (collapse.isTrue && _dragging.isFalse) {
-              collapse.value = false;
+              _erHoverOpenTimer?.cancel();
+              _erHoverOpenTimer = Timer(kErToolbarHoverOpen, () {
+                if (mounted && collapse.isTrue && _dragging.isFalse) {
+                  collapse.value = false;
+                }
+              });
             }
           },
+          onExit: (_) => _erHoverOpenTimer?.cancel(),
           child: Material(
           elevation: _ToolbarTheme.elevation,
           shadowColor: MyTheme.color(context).shadow,
@@ -818,6 +860,7 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
             setFullscreen: _setFullscreen,
             setMinimize: _minimize,
             borderRadius: borderRadius,
+            erMini: collapse.isTrue,
           ),
         ),
         ),
@@ -3329,6 +3372,8 @@ class _DraggableShowHide extends StatefulWidget {
 
   final Function(bool) setFullscreen;
   final Function() setMinimize;
+  // Electronics Remote: barra escondida = solo una pestañita para abrir/mover.
+  final bool erMini;
 
   const _DraggableShowHide({
     Key? key,
@@ -3349,6 +3394,7 @@ class _DraggableShowHide extends StatefulWidget {
     required this.setFullscreen,
     required this.setMinimize,
     required this.borderRadius,
+    this.erMini = false,
   }) : super(key: key);
 
   @override
@@ -3513,6 +3559,12 @@ class _DraggableShowHideState extends State<_DraggableShowHide> {
       name: kOptionRemoteMenubarFraction,
       value: frac.toString(),
     );
+    bind.setLocalFlutterOption(
+        k: kOptionRemoteMenubarState,
+        v: ErToolbarPrefs.merge(
+            bind.getLocalFlutterOption(k: kOptionRemoteMenubarState),
+            edge: _toolbarEdgeToString(newEdge),
+            fraction: frac));
     if (widget.multiEdgeEnabled) {
       return;
     }
@@ -3526,6 +3578,15 @@ class _DraggableShowHideState extends State<_DraggableShowHide> {
   Widget _buildDraggable(BuildContext context) {
     return Listener(
       onPointerDown: (event) => _lastPointerDown = event.position,
+      onPointerUp: (event) {
+        final down = _lastPointerDown;
+        if (widget.erMini &&
+            widget.dragging.isFalse &&
+            down != null &&
+            (event.position - down).distance < 4) {
+          collapse.value = false;
+        }
+      },
       child: Draggable(
         // When multi-edge docking is off the toolbar stays on the top edge,
         // so lock the feedback to horizontal motion — otherwise the handle
@@ -3534,7 +3595,7 @@ class _DraggableShowHideState extends State<_DraggableShowHide> {
         axis: widget.multiEdgeEnabled ? null : Axis.horizontal,
         child: Icon(
           widget.isHorizontal ? Icons.drag_indicator : Icons.drag_handle,
-          size: 20,
+          size: widget.erMini ? 14 : 20,
           color: MyTheme.color(context).drag_indicator,
         ),
         feedback: widget,
@@ -3558,8 +3619,41 @@ class _DraggableShowHideState extends State<_DraggableShowHide> {
     );
   }
 
+  Widget _erBuildMiniTab(BuildContext context) {
+    const long = kErToolbarTabLong;
+    const short = kErToolbarTabShort;
+    return _ErMiniTabOpacity(
+      child: Tooltip(
+        message: translate('Show Toolbar'),
+        waitDuration: const Duration(milliseconds: 800),
+        child: Container(
+          width: widget.isHorizontal ? long : short,
+          height: widget.isHorizontal ? short : long,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: Theme.of(context)
+                .menuBarTheme
+                .style
+                ?.backgroundColor
+                ?.resolve(MaterialState.values.toSet()),
+            border: Border.all(
+              color: _ToolbarTheme.borderColor(context),
+              width: 1,
+            ),
+            borderRadius: widget.borderRadius,
+          ),
+          child: MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: _buildDraggable(context),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (widget.erMini) return _erBuildMiniTab(context);
     final ButtonStyle buttonStyle = ButtonStyle(
       minimumSize: MaterialStateProperty.all(const Size(0, 0)),
       padding: MaterialStateProperty.all(EdgeInsets.zero),
@@ -3676,6 +3770,31 @@ class _DraggableShowHideState extends State<_DraggableShowHide> {
           width: widget.isHorizontal ? null : 20,
           child: child,
         ),
+      ),
+    );
+  }
+}
+
+class _ErMiniTabOpacity extends StatefulWidget {
+  final Widget child;
+  const _ErMiniTabOpacity({required this.child});
+
+  @override
+  State<_ErMiniTabOpacity> createState() => _ErMiniTabOpacityState();
+}
+
+class _ErMiniTabOpacityState extends State<_ErMiniTabOpacity> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: AnimatedOpacity(
+        opacity: _hover ? 1 : kErToolbarTabOpacity,
+        duration: const Duration(milliseconds: 150),
+        child: widget.child,
       ),
     );
   }

@@ -23,6 +23,7 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
+import '../../common/er_toolbar_prefs.dart';
 import '../../common/widgets/dialog.dart';
 import '../../common/widgets/login.dart';
 
@@ -490,7 +491,7 @@ class _GeneralState extends State<_General> {
         _OptionCheckBox(context, 'Confirm before closing multiple tabs',
             kOptionEnableConfirmClosingTabs,
             isServer: false),
-      if (!incomingOnly)
+      if (!incomingOnly && !erToolbarMultiEdge())
         _OptionCheckBox(
           context,
           'allow-remote-toolbar-docking-any-edge',
