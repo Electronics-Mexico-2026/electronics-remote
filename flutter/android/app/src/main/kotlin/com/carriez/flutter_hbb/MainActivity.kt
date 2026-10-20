@@ -98,6 +98,7 @@ class MainActivity : FlutterActivity() {
 
     override fun onResume() {
         super.onResume()
+        ErUpdater.onResume(this)
         val inputPer = InputService.isOpen
         activity.runOnUiThread {
             flutterMethodChannel?.invokeMethod(
@@ -105,6 +106,11 @@ class MainActivity : FlutterActivity() {
                 mapOf("name" to "input", "value" to inputPer.toString())
             )
         }
+    }
+
+    override fun onPause() {
+        ErUpdater.onPause()
+        super.onPause()
     }
 
     private fun requestMediaProjection() {
@@ -270,7 +276,8 @@ class MainActivity : FlutterActivity() {
                     val args = call.arguments
                     val url = (args as? Map<*, *>)?.get("url") as? String ?: args as? String ?: ""
                     val sha256 = (args as? Map<*, *>)?.get("sha256") as? String ?: ""
-                    result.success(ErUpdater.downloadAndInstall(activity, url, sha256))
+                    val auto = (args as? Map<*, *>)?.get("auto") as? Boolean ?: false
+                    result.success(ErUpdater.downloadAndInstall(activity, url, sha256, auto))
                 }
                 "init_service" -> {
                     Intent(activity, MainService::class.java).also {

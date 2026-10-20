@@ -23,7 +23,7 @@ Future<void> erCheckForUpdatesManually() async {
   if (_erChecking) return;
   _erChecking = true;
   try {
-    showToast('Buscando actualizaciones...');
+    showToast('Buscando actualizaciones…');
     await bind.mainSetCommon(key: 'er-check-update', value: '');
     for (int i = 0; i < 60; i++) {
       await Future.delayed(const Duration(milliseconds: 500));
@@ -34,7 +34,7 @@ Future<void> erCheckForUpdatesManually() async {
         stateGlobal.updateUrl.value = url;
         erStartUpdate(url);
       } else if (st == 'none') {
-        showToast('Ya tienes la version mas reciente (${erVersion()})');
+        showToast('Ya tienes la versión más reciente (${erVersion()}).');
       } else {
         showToast('No se pudo revisar si hay actualizaciones');
       }
@@ -108,11 +108,16 @@ Future<void> erAutoUpdateAndroid() async {
       if (!erIsNewer(url, erVersion())) return;
       stateGlobal.updateUrl.value = url;
       final v = erVersionKey(url);
-      showToast(
-          'Hay versión nueva (er.${v[3]}). Se está descargando; cuando '
-          'aparezca el instalador toca «Instalar».',
-          timeout: const Duration(seconds: 8));
-      await erUpdateApk(quiet: true);
+      // Solo por WiFi: con datos móviles no descarga y se vuelve a revisar
+      // la próxima vez que se abra la app.
+      if (await erUpdateApk(quiet: true)) {
+        showToast(
+            'Hay versión nueva (er.${v[3]}). Se está descargando por WiFi; '
+            'cuando aparezca el instalador toca «Instalar».',
+            timeout: const Duration(seconds: 8));
+      } else {
+        await bind.mainSetLocalOption(key: _kErLastAutoCheck, value: '0');
+      }
       return;
     }
   } finally {
@@ -120,22 +125,23 @@ Future<void> erAutoUpdateAndroid() async {
   }
 }
 
-Future<void> erUpdateApk({bool quiet = false}) async {
+Future<bool> erUpdateApk({bool quiet = false}) async {
   final apkUrl = bind.mainGetCommonSync(key: 'er-apk-url');
   // sha256 de latest.json del bucket; vacío con el respaldo de GitHub.
   final apkSha256 = bind.mainGetCommonSync(key: 'er-apk-sha256');
   bool ok = false;
   try {
     ok = await gFFI.invokeMethod(
-        'er_update_apk', {'url': apkUrl, 'sha256': apkSha256});
+        'er_update_apk', {'url': apkUrl, 'sha256': apkSha256, 'auto': quiet});
   } catch (e) {
     debugPrint('er_update_apk: $e');
   }
-  if (ok && quiet) return;
+  if (ok && quiet) return true;
   if (ok) {
-    showToast('Descargando actualizacion... al terminar se abrira el instalador',
+    showToast('Descargando la actualización… al terminar se abrirá el instalador.',
         timeout: const Duration(seconds: 5));
   } else if (!quiet) {
     await launchUrl(Uri.parse(apkUrl), mode: LaunchMode.externalApplication);
   }
+  return ok;
 }

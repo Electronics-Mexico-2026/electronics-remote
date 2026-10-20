@@ -843,8 +843,24 @@ jobs:
           GH_REPO: ${{ github.repository }}
           WIN_RESULT: ${{ needs.build-windows-x64.result }}
           APK_RESULT: ${{ needs.build-android-apk.result }}
+          SRC_RUN: ${{ inputs.release_from_run }}
         run: |
           ls -la dist
+          # Con release_from_run la version y el tag salen de la corrida que
+          # COMPILO (los binarios llevan su ER_VERSION), no de esta. Si no
+          # coincidieran, la app se veria vieja para siempre y bajaria la
+          # actualizacion cada 3 h.
+          SRC_SHA="$GITHUB_SHA"
+          SRC_RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          if [ -n "$SRC_RUN" ]; then
+            SRC_NUM=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${SRC_RUN}" --jq .run_number)
+            SRC_SHA=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${SRC_RUN}" --jq .head_sha)
+            [ -n "$SRC_NUM" ] && [ -n "$SRC_SHA" ] || { echo "::error::no se pudo leer la corrida $SRC_RUN"; exit 1; }
+            ER_VERSION="${VERSION}-er.${SRC_NUM}"
+            RELEASE_TAG="electronics-remote-${ER_VERSION}"
+            SRC_RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${SRC_RUN}"
+            echo "Publicando la corrida $SRC_RUN (#$SRC_NUM): $RELEASE_TAG @ $SRC_SHA"
+          fi
           # El actualizador de la app baja estos nombres exactos (bucket y releases).
           for f in ElectronicsRemote.apk ElectronicsRemote-x64.exe ElectronicsRemote-x64.msi                    ElectronicsRemoteEquipo-x64.exe ElectronicsRemoteEquipo-x64.msi; do
             [ -s "dist/$f" ] || { echo "::error::falta $f (el actualizador no lo encontraria)"; exit 1; }
@@ -862,14 +878,14 @@ jobs:
             echo
             echo "$NOTE"
             echo
-            echo "- Commit: ${GITHUB_SHA}"
-            echo "- Corrida: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo "- Commit: ${SRC_SHA}"
+            echo "- Corrida: ${SRC_RUN_URL}"
             echo "- Windows x64: ${WIN_RESULT} | Android universal: ${APK_RESULT}"
             echo "- Version: ${ER_VERSION}"
             echo "- Actualizador: lee latest.json del bucket publico (publicar con publicar_bucket.py); respaldo: releases/latest."
             echo "- ElectronicsRemoteEquipo-x64.exe (.msi): Electronics Remote Equipo, SOLO RECIBIR, para las PCs que solo se controlan (servicio ElectronicsRemoteEquipo, arranque automatico)."
           } > notes.md
           gh release delete "$RELEASE_TAG" --yes --cleanup-tag || true
-          gh api "repos/${GITHUB_REPOSITORY}/git/refs" -f ref="refs/tags/${RELEASE_TAG}" -f sha="${GITHUB_SHA}"             || echo "::warning::no se pudo crear el tag por API (ver arriba)"
-          gh release create "$RELEASE_TAG" dist/* --target "$GITHUB_SHA" \
+          gh api "repos/${GITHUB_REPOSITORY}/git/refs" -f ref="refs/tags/${RELEASE_TAG}" -f sha="${SRC_SHA}"             || echo "::warning::no se pudo crear el tag por API (ver arriba)"
+          gh release create "$RELEASE_TAG" dist/* --target "$SRC_SHA" \
             --title "Electronics Remote ${ER_VERSION}" --notes-file notes.md $FLAG

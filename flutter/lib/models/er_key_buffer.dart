@@ -69,6 +69,11 @@ class ErKeyBuffer {
   /// Nunca se reenvía nada mandado hace más de esto antes de la caída.
   static const Duration resendWindow = Duration(seconds: 20);
 
+  /// De lo no confirmado solo se reenvía la última ráfaga (lo mandado hasta
+  /// 2 s antes de la última tecla): las imágenes llegan con retraso, así que
+  /// mucho de lo «no confirmado» sí había llegado y salía repetido.
+  static const Duration resendBurst = Duration(seconds: 2);
+
   /// Pausa entre envíos al vaciar el búfer (que el equipo no se atragante).
   static const Duration flushGap = Duration(milliseconds: 12);
 
@@ -177,6 +182,10 @@ class ErKeyBuffer {
     final old = now().subtract(resendWindow);
     var unconfirmed = _recent.where((e) => e.at.isAfter(old)).toList();
     _recent.clear();
+    if (unconfirmed.isNotEmpty) {
+      final burst = unconfirmed.last.at.subtract(resendBurst);
+      unconfirmed = unconfirmed.where((e) => !e.at.isBefore(burst)).toList();
+    }
     // Un Enter o un atajo (Ctrl+V, Alt+F4…) repetido hace daño si sí había
     // llegado: no se reenvía ni lo de antes, solo lo escrito después.
     final last = unconfirmed.lastIndexWhere((e) =>

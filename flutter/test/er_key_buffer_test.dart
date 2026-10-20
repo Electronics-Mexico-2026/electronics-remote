@@ -44,6 +44,19 @@ void main() {
     expect(sent, ['b', 'c']);
   });
 
+  test('al reconectar solo se reenvían los últimos ~2 s sin confirmar',
+      () async {
+    var t = DateTime(2026, 10, 16, 14, 0, 0);
+    final b = ErKeyBuffer(now: () => t);
+    expect(b.offer(k('a', t)), isFalse);
+    t = t.add(const Duration(seconds: 3));
+    expect(b.offer(k('b', t)), isFalse);
+    t = t.add(const Duration(milliseconds: 500));
+    expect(b.offer(k('c', t)), isFalse);
+    b.markDown();
+    expect(b.pendingForTest.map((e) => e.key), ['b', 'c']);
+  });
+
   test('un Enter sin confirmar no se reenvía (ni lo de antes)', () async {
     var t = DateTime(2026, 10, 16, 14, 0, 0);
     final b = ErKeyBuffer(now: () => t);

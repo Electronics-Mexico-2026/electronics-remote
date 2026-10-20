@@ -1175,6 +1175,35 @@ Widget createDialogContent(String text) {
   );
 }
 
+/// Electronics Remote: los errores de red que llegan de Rust vienen en
+/// inglés y traen la IP y el puerto del servidor. Para mostrarlos se pasan a
+/// español sin la IP. (La lógica de reintentos compara el texto original.)
+String erFriendlyNetError(String text) {
+  final t = text.toLowerCase();
+  if (t.startsWith('failed to connect to') ||
+      t.contains('network is unreachable') ||
+      t.contains('failed to lookup address')) {
+    return 'No se pudo conectar con el servidor. Revisa la conexión a '
+        'internet; se vuelve a intentar solo.';
+  }
+  if (t.contains('failed to secure tcp')) {
+    return 'No se pudo establecer una conexión segura con el equipo. '
+        'Inténtalo de nuevo en unos segundos.';
+  }
+  if (t.contains('software caused connection abort') ||
+      t.contains('connection reset') ||
+      t.contains('broken pipe') ||
+      t.contains('timed out') ||
+      t.contains('deadline has elapsed') ||
+      t.contains('reset by peer')) {
+    return 'Se perdió la conexión con el equipo. Revisa la red; se vuelve a '
+        'intentar solo.';
+  }
+  // Cualquier otro texto: nunca mostrar la IP ni el puerto del servidor.
+  return text.replaceAll(
+      RegExp(r'\b\d{1,3}(\.\d{1,3}){3}(:\d+)?\b'), 'el servidor');
+}
+
 void msgBox(SessionID sessionId, String type, String title, String text,
     String link, OverlayDialogManager dialogManager,
     {bool? hasCancel,
@@ -1183,6 +1212,7 @@ void msgBox(SessionID sessionId, String type, String title, String text,
     VoidCallback? onSubmit,
     int? submitTimeout}) {
   dialogManager.dismissAll();
+  text = erFriendlyNetError(text);
   if (type.contains('insecure-connection')) {
     Future<void> closeSession() async {
       await bind.sessionSetCommon(
