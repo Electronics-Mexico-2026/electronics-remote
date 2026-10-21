@@ -83,6 +83,12 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
   // Electronics Remote: el teclado estaba abierto cuando se cayó la conexión;
   // al volver la imagen se vuelve a abrir solo.
   var _erKeyboardWanted = false;
+  // Electronics Remote: mientras se está abriendo el teclado (el campo oculto
+  // se destruye y se vuelve a crear) el teclado parpadea cerrado/abierto. En
+  // esa ventana NO se interpreta el cierre como «la persona lo cerró».
+  DateTime? _erOpeningUntil;
+  bool get _erOpening =>
+      _erOpeningUntil != null && DateTime.now().isBefore(_erOpeningUntil!);
   final ErImeField _erIme = ErImeField(initText);
 
   Worker? _waylandKeyboardGateWorker;
@@ -149,6 +155,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
       if (isAndroid) erMobileApplyQualityDefault(gFFI, widget.id);
     });
     WidgetsBinding.instance.addObserver(this);
+    if (isAndroid) _erWinSize = _erCurrentWinSize();
 
     inputModel.keyboardInputAllowed = true;
     inputModel.erKeys.onChanged = erKeyBufferNotice();
@@ -170,6 +177,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
   Future<void> dispose() async {
     if (isAndroid) ErThumbs.stopCapture(_erThumbTimer, gFFI, widget.id);
     WidgetsBinding.instance.removeObserver(this);
+    _erRefitTimer?.cancel();
     inputModel.erKeys.onChanged = null;
     // Close the session up-front. `gFFI.close()` below only calls `sessionClose`
     // after several awaits (canvas save, image update, the `enable_soft_keyboard`
@@ -204,6 +212,39 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
     // The inner logic of `on_voice_call_closed` will check if the voice call is active.
     // Only one client is considered here for now.
     gFFI.chatModel.onVoiceCallClosed("End connection");
+  }
+
+  /// Electronics Remote (Android): tamaño de la ventana (sin el teclado).
+  Size? _erWinSize;
+  Timer? _erRefitTimer;
+
+  Size _erCurrentWinSize() {
+    final v = WidgetsBinding.instance.platformDispatcher.views.first;
+    return v.physicalSize / v.devicePixelRatio;
+  }
+
+  /// Doblar o abrir el Fold (o pantalla dividida) cambia el ancho de la
+  /// ventana sin girarla: la imagen se quedaba con el acomodo de la otra
+  /// pantalla (cortada en la de afuera). Se reajusta como al girar. El teclado
+  /// no cambia el tamaño de la ventana, así que no quita el zoom al escribir.
+  @override
+  void didChangeMetrics() {
+    super.didChangeMetrics();
+    if (!isAndroid) return;
+    final s = _erCurrentWinSize();
+    final prev = _erWinSize;
+    _erWinSize = s;
+    if (prev == null ||
+        ((prev.width - s.width).abs() < 2 &&
+            (prev.height - s.height).abs() < 2)) {
+      return;
+    }
+    _erRefitTimer?.cancel();
+    _erRefitTimer = Timer(const Duration(milliseconds: 300), () {
+      if (!mounted) return;
+      gFFI.dialogManager.resetMobileActionsOverlay(ffi: gFFI);
+      gFFI.canvasModel.updateViewStyle();
+    });
   }
 
   @override
@@ -272,7 +313,8 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual, overlays: []);
       // [pi.version.isNotEmpty] -> check ready or not, avoid login without soft-keyboard
       if (gFFI.chatModel.chatWindowOverlayEntry == null &&
-          gFFI.ffiModel.pi.version.isNotEmpty) {
+          gFFI.ffiModel.pi.version.isNotEmpty &&
+          !(isAndroid && _erOpening)) {
         gFFI.invokeMethod("enable_soft_keyboard", false);
       }
 
@@ -500,6 +542,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
   void _openKeyboardUnlocked() {
     inputModel.keyboardInputAllowed = true;
     _erKeyboardWanted = true;
+    _erOpeningUntil = DateTime.now().add(const Duration(milliseconds: 1500));
     gFFI.invokeMethod("enable_soft_keyboard", true);
     // destroy first, so that our _value trick can work
     _value = initText;
@@ -654,6 +697,13 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
                   actions: ErSessionActions(
                     openKeyboard: openKeyboard,
                     hideKeyboard: () {
+                      // Si había una apertura en curso se cancela: si no, su
+                      // temporizador volvía a crear el campo con el teclado
+                      // ya bloqueado (FLAG_ALT_FOCUSABLE_IM) y el teclado
+                      // quedaba «abierto» pero invisible (falla de la er.30).
+                      _timer?.cancel();
+                      _erOpeningUntil = null;
+                      _erKeyboardWanted = false;
                       setState(() => _showEdit = false);
                       gFFI.invokeMethod("enable_soft_keyboard", false);
                       _mobileFocusNode.unfocus();
@@ -661,6 +711,8 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
                     },
                     keyboardVisible: () =>
                         keyboardVisibilityController.isVisible && _showEdit,
+                    keyboardRequested: () => _showEdit || _erOpening,
+                    keyboardOpening: () => _erOpening,
                     showOptions: () {
                       setState(() => _showEdit = false);
                       showOptions(context, widget.id, gFFI.dialogManager);

@@ -33,6 +33,10 @@ on:
         description: "Prueba de compilacion sin servidor (pendiente.invalid + llave original). Publica como prerelease"
         type: boolean
         default: false
+      prerelease:
+        description: "Publicar como PRE-RELEASE (no queda como la ultima en GitHub; para probar antes de darla a los equipos)"
+        type: boolean
+        default: false
 
 env:
   RUST_VERSION: "1.75"
@@ -58,6 +62,7 @@ env:
   RS_PUB_KEY: ${{ inputs.rs_pub_key }}
   API_SERVER: ${{ inputs.api_server }}
   ALLOW_PLACEHOLDER: ${{ inputs.placeholder && '1' || '0' }}
+  ER_PRERELEASE: ${{ inputs.prerelease && '1' || '0' }}
 
 permissions:
   contents: read
@@ -869,6 +874,9 @@ jobs:
           if [ "$ALLOW_PLACEHOLDER" = "1" ]; then
             FLAG=--prerelease
             NOTE="PRUEBA DE COMPILACION (placeholder): servidor pendiente.invalid y llave original de RustDesk. NO instalar en produccion."
+          elif [ "$ER_PRERELEASE" = "1" ]; then
+            FLAG="--prerelease --latest=false"
+            NOTE="PRE-RELEASE de prueba (servidor propio). NO es la ultima: los equipos siguen con la que diga latest.json del bucket."
           else
             FLAG=--latest
             NOTE="Version para produccion (servidor propio configurado en la compilacion)."

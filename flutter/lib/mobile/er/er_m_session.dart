@@ -390,6 +390,11 @@ class ErSessionActions {
   final VoidCallback openKeyboard;
   final VoidCallback hideKeyboard;
   final bool Function() keyboardVisible;
+  /// El campo oculto existe (o se está creando): hay teclado pedido aunque
+  /// sea flotante (el flotante no achica la ventana y no se «ve» abierto).
+  final bool Function() keyboardRequested;
+  /// Se está abriendo el teclado ahora mismo (parpadea cerrado/abierto).
+  final bool Function() keyboardOpening;
   final VoidCallback showOptions;
   final VoidCallback showActions;
   final VoidCallback chat;
@@ -398,6 +403,8 @@ class ErSessionActions {
     required this.openKeyboard,
     required this.hideKeyboard,
     required this.keyboardVisible,
+    required this.keyboardRequested,
+    required this.keyboardOpening,
     required this.showOptions,
     required this.showActions,
     required this.chat,
@@ -425,6 +432,10 @@ class _ErSessionOverlayState extends State<ErSessionOverlay> {
   Timer? _hideTimer;
   double _scrollAcc = 0;
   bool _kbWasVisible = false;
+  Timer? _kbCloseTimer;
+  // Se escondió el teclado con el botón de la fila: la fila se queda (Ctrl,
+  // Alt, flechas sin el teclado tapando la pantalla) hasta volver a abrirlo.
+  bool _rowOnly = false;
 
   FFI get _ffi => gFFI;
   InputModel get _input => _ffi.inputModel;
@@ -439,6 +450,7 @@ class _ErSessionOverlayState extends State<ErSessionOverlay> {
   @override
   void dispose() {
     _hideTimer?.cancel();
+    _kbCloseTimer?.cancel();
     erLockedMods.clear();
     _input.resetModifiers();
     super.dispose();
@@ -464,25 +476,38 @@ class _ErSessionOverlayState extends State<ErSessionOverlay> {
     return !m.viewOnly && m.keyboard;
   }
 
-  /// ¿Está abierto el teclado del celular? El Scaffold de la sesión achica
-  /// su body por arriba del teclado (resizeToAvoidBottomInset), así que aquí
-  /// adentro `MediaQuery.viewInsets.bottom` siempre vale 0: se lee el de la
-  /// ventana y, por el teclado flotante/dividido del Fold, también el estado
-  /// que lleva la página remota.
-  bool _erKbOpen(BuildContext c) =>
-      MediaQueryData.fromView(View.of(c)).viewInsets.bottom > 0 ||
-      widget.actions.keyboardVisible();
+  /// ¿Está abierto el teclado del celular? Lo dice la página remota (plugin
+  /// de visibilidad + campo oculto). La página llama setState cada vez que el
+  /// teclado cambia, así que esta barra se reconstruye con el dato fresco.
+  /// (La er.30 leía `MediaQueryData.fromView`, que NO avisa cambios: el dato
+  /// se quedaba viejo y la barra cerraba el teclado justo al abrirlo.)
+  bool _erKbOpen() => widget.actions.keyboardVisible();
 
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
-    final kb = _erKbOpen(context);
+    final kb = _erKbOpen();
     // Como RealVNC: las teclas extra viven con el teclado. Si el teclado del
-    // celular se cierra (atrás, gesto), la fila también se va y el campo
-    // oculto suelta el foco para que el teclado no vuelva a salir solo.
-    if (_kbWasVisible && !kb && _keysOn) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || _erKbOpen(context)) return;
+    // celular se cierra (atrás, gesto), la fila también se va. Se espera un
+    // momento y se vuelve a revisar: al abrirlo (y en el Samsung al cambiar de
+    // modo o al doblar el Fold) el teclado parpadea cerrado/abierto, y cerrar
+    // en ese parpadeo dejaba el teclado muerto.
+    if (kb) {
+      _rowOnly = false;
+      _kbCloseTimer?.cancel();
+      _kbCloseTimer = null;
+    } else if (_kbWasVisible &&
+        _keysOn &&
+        !_rowOnly &&
+        !widget.actions.keyboardOpening()) {
+      _kbCloseTimer?.cancel();
+      _kbCloseTimer = Timer(const Duration(milliseconds: 700), () {
+        _kbCloseTimer = null;
+        if (!mounted || !_keysOn || _rowOnly) return;
+        if (widget.actions.keyboardVisible() ||
+            widget.actions.keyboardOpening()) {
+          return;
+        }
         setState(() => _keysOn = false);
         widget.actions.hideKeyboard();
       });
@@ -496,7 +521,8 @@ class _ErSessionOverlayState extends State<ErSessionOverlay> {
         if (_keysOn && _canInput)
           Positioned(
               left: 0, right: 0, bottom: 0, child: _keysBar(context, kb)),
-        if (kb && _canInput)
+        if ((kb || (_keysOn && widget.actions.keyboardRequested())) &&
+            _canInput)
           Positioned(
               left: 0, right: 0, bottom: keysH, child: _erTypingPreview()),
         _toolbar(context, size),
@@ -670,10 +696,17 @@ class _ErSessionOverlayState extends State<ErSessionOverlay> {
   }
 
   void _toggleKeyboard() {
-    if (_keysOn) {
+    _kbCloseTimer?.cancel();
+    _kbCloseTimer = null;
+    _rowOnly = false;
+    // Con la fila puesta pero el teclado cerrado, el botón lo vuelve a abrir
+    // (antes el primer toque solo quitaba la fila).
+    if (_keysOn && widget.actions.keyboardVisible()) {
       _keysOn = false;
       widget.actions.hideKeyboard();
     } else {
+      // Al abrir de nuevo, la vista previa empieza vacía (no lo de antes).
+      if (!_keysOn) _input.erKeys.clearPreview();
       _keysOn = true;
       widget.actions.openKeyboard();
     }
@@ -798,9 +831,13 @@ class _ErSessionOverlayState extends State<ErSessionOverlay> {
                     : Icons.keyboard_outlined,
                 color: ErColors.cyan),
             onPressed: () {
+              _kbCloseTimer?.cancel();
+              _kbCloseTimer = null;
               if (widget.actions.keyboardVisible()) {
+                _rowOnly = true;
                 widget.actions.hideKeyboard();
               } else {
+                _rowOnly = false;
                 widget.actions.openKeyboard();
               }
               setState(() {});
